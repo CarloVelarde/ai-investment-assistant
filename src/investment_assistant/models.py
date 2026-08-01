@@ -28,3 +28,15 @@ class NewsRecord:
     summary: str
     published_at: datetime
     source: str
+
+
+@dataclass(frozen=True, slots=True)
+class MarketSignal:
+    """A market record that passed the walking-skeleton rule."""
+
+    symbol: str
+    occurred_at: datetime
+    price_decline_ratio: Decimal
+    volume_ratio: Decimal
+    provider: str
+    feed: str
