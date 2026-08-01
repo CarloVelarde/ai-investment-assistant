@@ -11,7 +11,7 @@
 - [x] 3. Implement the inclusive market rule with passing, failing, and boundary tests.
 - [x] 4. Implement fixed-phrase news filtering with passing and failing headline, summary, and case tests.
 - [x] 5. Correlate signals into exactly one event; test normalized-symbol matching and times inside, at, and outside 60 minutes.
-- [ ] 6. Add the labeled fake report and marked console notification; test research gating and notification count and content.
+- [x] 6. Add the labeled fake report and marked console notification; test research gating and notification count and content.
 - [ ] 7. Wire the pipeline into the existing console entry point without changing its configuration or logging bootstrap.
 - [ ] 8. Add the triggering end-to-end test for one event, report, and notification.
 - [ ] 9. Add the non-triggering end-to-end test for no event, research, or notification.

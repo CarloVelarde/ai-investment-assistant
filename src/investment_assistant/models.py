@@ -61,3 +61,13 @@ class SignificantEvent:
     occurred_at: datetime
     market_signal: MarketSignal
     news_signal: NewsSignal
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchReport:
+    """Structured research output for one event."""
+
+    symbol: str
+    event_occurred_at: datetime
+    summary: str
+    is_fake: bool
