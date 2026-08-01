@@ -51,3 +51,13 @@ class NewsSignal:
     matched_phrase: str
     headline: str
     source: str
+
+
+@dataclass(frozen=True, slots=True)
+class SignificantEvent:
+    """One correlated market and news event."""
+
+    symbol: str
+    occurred_at: datetime
+    market_signal: MarketSignal
+    news_signal: NewsSignal
