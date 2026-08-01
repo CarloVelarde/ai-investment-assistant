@@ -1,30 +1,24 @@
 # Implementation Plan: <Feature Name>
 
-**Status:** Draft
+**Document status:** Draft
 
 ## Approach
 
-Briefly describe how the feature will be implemented.
+Describe the smallest complete implementation.
 
-## Components
+## Key decisions
 
-- List the existing or new components involved.
-- Keep the design limited to what this feature requires.
+- Record feature-specific rules and boundaries needed for implementation.
 
 ## Data flow
 
-Describe the feature's main execution flow from input to output.
+Describe the main path from input to observable output.
 
 ## Validation
 
-- List the tests or checks needed to verify the feature.
-- Include successful and non-triggering behavior.
+- Cover each acceptance criterion with focused or end-to-end tests.
+- Include triggering, non-triggering, and important failure behavior.
 
-## Risks and tradeoffs
+## Tradeoffs
 
-- Note important implementation risks or decisions.
-- Avoid speculative future concerns.
-
-## Completion
-
-The plan is complete when the implementation approach is clear enough to create ordered tasks.
+- Record only risks or compromises relevant to this feature.

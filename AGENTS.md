@@ -1,51 +1,49 @@
 # AI Investment Assistant — Agent Instructions
 
-## Purpose
+Keep changes small, explainable, and aligned with the active milestone.
 
-This file defines how coding agents should work in this repository. Keep changes small, explainable, and aligned with the active milestone.
+## Required context
 
-## Required Context
-
-Read only the context relevant to the task:
+Read only:
 
 1. This file.
-2. The active feature's `SPEC.md`, `PLAN.md`, and `TASKS.md`, if one exists.
+2. The active feature's `SPEC.md`, `PLAN.md`, and `TASKS.md`.
 3. The permanent document that owns the affected decision:
-   - [`docs/PRODUCT.md`](docs/PRODUCT.md) for product scope and behavior.
+   - [`docs/PRODUCT.md`](docs/PRODUCT.md) for product behavior and scope.
    - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for system boundaries and data flow.
-   - [`docs/DECISIONS.md`](docs/DECISIONS.md) for durable accepted and rejected choices.
+   - [`docs/DECISIONS.md`](docs/DECISIONS.md) for durable choices.
    - [`docs/ROADMAP.md`](docs/ROADMAP.md) for milestone order and status.
 
-Do not treat `docs/archive/` as authoritative. Do not load every document by default.
+`docs/archive/` is not authoritative. Do not load every document by default.
 
-## Working Process
+## Workflow
 
-1. Confirm the task belongs to the active milestone and spec.
-2. Inspect the existing code and tests before proposing changes.
-3. Implement the smallest complete behavior that satisfies the acceptance criteria.
-4. Add or update tests with the implementation.
-5. Update the active `TASKS.md` when task status changes.
-6. Run all repository checks before declaring completion.
-7. Summarize what changed, what was validated, and any remaining limitations.
+1. Confirm the task belongs to the active milestone and approved spec.
+2. Inspect existing code and tests.
+3. Implement the smallest complete behavior that meets the acceptance criteria.
+4. Add tests with the implementation.
+5. Update `TASKS.md` as status changes.
+6. Run all repository checks.
+7. Summarize changes, validation, and limitations.
 
-Meaningful features require an approved spec. Small documentation, tooling, or corrective changes may proceed without a new spec when they do not change product scope or stable architecture.
+Documentation, tooling, and corrective changes may proceed without a feature spec when they do not change product scope or stable architecture.
 
-## Implementation Rules
+## Implementation rules
 
-- Use Python `>=3.14,<3.15` and manage dependencies with `uv`.
-- Keep application code under `src/investment_assistant/` and tests under `tests/`.
-- Prefer typed, straightforward code over clever or overly generic designs.
-- Build thin vertical slices; do not pre-create unused packages, services, or abstractions.
+- Use Python `>=3.14,<3.15` and `uv`.
+- Keep code under `src/investment_assistant/` and tests under `tests/`.
+- Prefer typed, explicit code and thin vertical slices.
 - Add interfaces only at real external or replaceable boundaries.
-- Convert provider SDK objects into internal models before they enter core logic.
+- Convert provider objects into internal models before core logic.
 - Keep deterministic detection, filtering, correlation, cooldowns, and deduplication outside AI components.
-- Keep the cheap news classifier separate from focused research.
+- Keep news classification separate from research.
 - Make time and external I/O controllable when behavior depends on them.
-- Preserve provenance where data source, feed, retrieval time, or model version affects interpretation.
+- Preserve provenance when source, feed, retrieval time, or model version affects interpretation.
+- Introduce external services only in their roadmap milestone.
 
-Do not introduce external services before their roadmap milestone. In particular, the offline walking skeleton must not use live APIs, secrets, SQLite, LLM calls, Alpaca, SEC EDGAR, or Discord.
+Do not pre-create unused packages, services, abstractions, or optional dependencies.
 
-## Testing and Validation
+## Validation
 
 Before completing a code task, run:
 
@@ -56,42 +54,27 @@ uv run mypy src
 uv run pytest
 ```
 
-Testing expectations:
+Tests must be deterministic, avoid live services, and cover public behavior. Use fakes for providers, clocks, research, and notifications. Add regression tests for reproducible bugs. Never weaken checks to make them pass; report any check that cannot run.
 
-- Tests must be deterministic and must not depend on live external services.
-- Test behavior and public boundaries rather than private implementation details.
-- Use fixtures and fakes for providers, clocks, research, and notifications where appropriate.
-- Add a regression test when fixing a reproducible bug.
-- Do not weaken checks or remove tests merely to make validation pass.
+## Documentation ownership
 
-If a check cannot run or pass, report the exact reason rather than claiming completion.
+- Product scope and behavior: `docs/PRODUCT.md`
+- Stable architecture: `docs/ARCHITECTURE.md`
+- Durable or superseded decisions: `docs/DECISIONS.md`
+- Milestone status: `docs/ROADMAP.md`
+- Feature behavior and acceptance criteria: `SPEC.md`
+- Implementation approach: `PLAN.md`
+- Execution status: `TASKS.md`
 
-## Documentation Ownership
+Record changes to stable product or architecture decisions in `docs/DECISIONS.md` first.
 
-Keep each fact in one authoritative location and link to it elsewhere.
-
-- Product scope changes belong in `docs/PRODUCT.md`.
-- Stable architecture changes belong in `docs/ARCHITECTURE.md`.
-- Durable decisions and superseded choices belong in `docs/DECISIONS.md`.
-- Milestone status belongs in `docs/ROADMAP.md`.
-- Feature behavior and acceptance criteria belong in its `SPEC.md`.
-- Implementation approach belongs in its `PLAN.md`.
-- Execution status belongs in its `TASKS.md`.
-
-Do not silently change stable product or architecture decisions. Record and explain the change in `docs/DECISIONS.md` first.
-
-## Security and Safety
+## Safety and scope
 
 - Never commit credentials, `.env` files, tokens, or private financial data.
-- Never place secrets in fixtures, logs, exceptions, model prompts, or test output.
+- Keep secrets out of fixtures, logs, exceptions, prompts, and test output.
 - Validate external inputs and structured model outputs at their boundaries.
 - Keep research tools narrow, read-only, bounded, and application-controlled.
-- Do not add brokerage integration, order execution, or autonomous trading behavior.
-- Preserve unrelated user changes and avoid destructive Git operations.
-- Do not commit, push, or modify remote resources unless explicitly requested.
-
-## Scope Guardrails
-
-This is a solo, resume-oriented project—not an enterprise platform. Favor reliability, replayability, understandable design, and a working core loop over infrastructure breadth.
-
-Do not add microservices, Redis, Celery, Kafka, Kubernetes, a complex multi-agent framework, or optional libraries without a demonstrated need in the active feature.
+- Never add brokerage integration, order execution, or autonomous trading.
+- Preserve unrelated changes; do not commit or modify remotes unless asked.
+- Favor reliability, replayability, and a working core loop over infrastructure breadth.
+- Do not add microservices, Redis, Celery, Kafka, Kubernetes, or a complex multi-agent framework.

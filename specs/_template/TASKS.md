@@ -1,18 +1,21 @@
 # Tasks: <Feature Name>
 
-**Status:** Not started
+**Document status:** Draft
 
-## Task list
+**Execution status:** Not started
 
-- [ ] 1. Define the smallest implementation step.
-- [ ] 2. Add the next required behavior.
-- [ ] 3. Add validation for triggering behavior.
-- [ ] 4. Add validation for non-triggering behavior.
-- [ ] 5. Run the required project checks.
-- [ ] 6. Update the specification or plan if implementation decisions changed.
+## Tasks
 
-## Notes
+- [ ] 1. Implement the smallest behavior with its tests.
+- [ ] 2. Add the next behavior with its tests.
+- [ ] 3. Add end-to-end triggering and non-triggering coverage.
+- [ ] 4. Run all repository checks.
 
-- Complete tasks in order unless a dependency requires otherwise.
-- Keep each task small enough to implement and verify independently.
-- Mark tasks complete only after their validation passes.
+## Acceptance coverage
+
+| Criteria | Tasks |
+| --- | --- |
+| AC-01 | 1, 3 |
+| AC-02 | 2–3 |
+
+Mark tasks complete only after validation passes. Update the owning document before changing scope or architecture.

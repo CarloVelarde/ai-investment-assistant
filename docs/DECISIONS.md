@@ -1,171 +1,121 @@
-# AI Investment Assistant — Decision Log
+# AI Investment Assistant — Decisions
 
-**Status:** Active  
-**Last reviewed:** July 31, 2026
+**Status:** Active
 
-## Document Purpose
+This log owns durable choices. Routine details belong in code or the active feature spec. Accepted entries remain active unless a later entry marks them superseded.
 
-This file records durable product, architecture, tooling, and repository decisions that future work should not silently change.
-
-Routine implementation details belong in code or the active feature spec. If a decision changes, add a new entry and mark the old one superseded rather than rewriting history.
-
-## Accepted Decisions
+## Accepted
 
 ### D-001 — Build a research assistant, not a trading system
 
-**Status:** Accepted
+Investigate significant events and present evidence for human review. Never execute trades or issue authoritative buy or sell decisions.
 
-The product monitors a small stock watchlist, investigates significant events, and presents evidence for user review. It will not execute trades or issue authoritative buy or sell decisions.
-
-**Why:** The project serves a long-term investor and keeps financial decisions under human control.
+**Why:** Investment decisions remain under user control.
 
 ### D-002 — Use one local Python application for the MVP
 
-**Status:** Accepted
+Run one modular, single-process application; use `asyncio` only where concurrent I/O helps.
 
-The MVP will run as one modular, single-process Python application. `asyncio` may coordinate concurrent I/O where useful.
-
-**Why:** This is sufficient for a solo project and avoids unnecessary distributed-system complexity.
+**Why:** A solo project does not need distributed-system complexity.
 
 ### D-003 — Keep external providers replaceable
 
-**Status:** Accepted
+Core logic consumes normalized internal models through narrow provider boundaries; provider SDK objects do not enter the core.
 
-Core logic will consume normalized internal models through narrow provider interfaces. Alpaca SDK types must not enter the detection or research core.
-
-**Why:** Alpaca Basic may later be replaced by Algo Trader Plus or another provider without rewriting the core pipeline.
+**Why:** Providers can change without rewriting detection or research.
 
 ### D-004 — Use deterministic logic before AI
 
-**Status:** Accepted
+Ordinary code handles measurable rules, filtering, correlation, cooldowns, and deduplication. AI handles semantic judgment.
 
-Normal code handles measurable rules, filtering, correlation, cooldowns, and duplicate detection. AI is used only where semantic judgment adds value.
-
-**Why:** Deterministic behavior is cheaper, easier to test, and easier to explain.
+**Why:** Deterministic behavior is cheaper, testable, and explainable.
 
 ### D-005 — Separate news classification from research
 
-**Status:** Accepted
+A small classifier triages news; capable research runs only after an event qualifies.
 
-A small, inexpensive classifier decides whether news is relevant and significant. A separate, more capable research process runs only after an event passes the significance threshold.
-
-**Why:** Continuous monitoring stays affordable while deeper analysis remains available for important events.
+**Why:** Continuous monitoring stays affordable without weakening focused research.
 
 ### D-006 — Correlate signals into durable events
 
-**Status:** Accepted
+Related signals enrich one lifecycle-managed event. Routine repeats do not create duplicate research or notifications; materially new evidence may update an event.
 
-Related price, volume, and news signals become one event with lifecycle state. Materially new evidence may update an event; routine repeated signals must not create duplicate research or notifications.
-
-**Why:** The product should produce one useful report per real event.
+**Why:** One real event should produce one useful report.
 
 ### D-007 — Use bounded, application-controlled research
 
-**Status:** Accepted
+The application assembles evidence and exposes narrow read-only tools. Research output follows a validated schema and time, tool, source-size, rate, and cost limits.
 
-The application assembles evidence and exposes narrow, read-only research tools. Research output must follow a validated schema and remain subject to time, tool-call, source-size, rate, and cost limits.
-
-**Why:** This improves safety, reliability, reproducibility, and cost control.
+**Why:** Bounds improve safety, reliability, replayability, and cost control.
 
 ### D-008 — Use SQLite for MVP durability
 
-**Status:** Accepted
+SQLite stores event, report, failure, notification, and provenance state behind one controlled write boundary.
 
-SQLite will store event, report, failure, notification, and provenance state. Concurrent writes will pass through a controlled application boundary.
+**Why:** It provides enough local durability without a database service.
 
-**Why:** SQLite provides sufficient durability without requiring a separate database service. The exact schema and access library remain flexible.
+### D-009 — Use Alpaca, SEC EDGAR, OpenAI, and Discord first
 
-### D-009 — Use Alpaca, SEC EDGAR, OpenAI, and Discord initially
+Alpaca supplies market data and news; SEC EDGAR and hosted search supply evidence; OpenAI supports classification and research; Discord delivers alerts.
 
-**Status:** Accepted
-
-- Alpaca is the initial market-data and news provider.
-- SEC EDGAR and hosted web search provide additional research evidence.
-- OpenAI provides structured classification and research capabilities.
-- Discord is the initial notification channel.
-
-**Why:** Together they support the complete MVP loop while remaining practical for a personal project.
+**Why:** These services cover the MVP loop and remain practical for a personal project.
 
 ### D-010 — Build the offline walking skeleton first
 
-**Status:** Accepted
+Prove fixtures → normalization → deterministic detection → correlation → event → fake structured research → console notification before adding live services or SQLite.
 
-The first feature will prove this real internal flow:
-
-> Fixtures → normalization → deterministic detection → signal correlation → event → fake research report → console notification
-
-It will use no internet, secrets, database, live provider, LLM, or Discord integration.
-
-**Why:** This validates the core boundaries before external-service complexity is introduced.
+**Why:** Validate the internal boundaries before integration complexity.
 
 ### D-011 — Standardize the Python foundation
 
-**Status:** Accepted
-
 - Repository: `ai-investment-assistant`
-- Import package: `investment_assistant`
+- Package: `investment_assistant` under `src/`
 - Python: CPython `>=3.14,<3.15`, managed by `uv`
-- Layout: `src/investment_assistant/`
-- Build backend: `uv_build`
-- Quality tools: Ruff, mypy, and pytest
-- Configuration: Pydantic and `pydantic-settings`
-- CI: GitHub Actions on Ubuntu
-- Lockfile: commit `uv.lock`
+- Build: `uv_build`; commit `uv.lock`
+- Runtime configuration: Pydantic and `pydantic-settings`
+- Quality: Ruff, mypy, pytest, and GitHub Actions on Ubuntu
 
-**Why:** This gives the project a modern, reproducible, and lightweight development setup.
+**Why:** The setup is modern, reproducible, and small.
 
-### D-012 — Use WSL2 Ubuntu as the primary development environment
+### D-012 — Use WSL2 Ubuntu for primary development
 
-**Status:** Accepted
+Develop in WSL2 Ubuntu and keep the repository in its Linux filesystem rather than under `/mnt/c/`.
 
-Development will occur in WSL2 Ubuntu, with the repository stored in the Linux filesystem rather than under `/mnt/c/`. Docker will be introduced after the local foundation works.
-
-**Why:** This provides a consistent Linux-oriented environment with better filesystem behavior for the selected tools.
+**Why:** This gives the selected tools consistent Linux filesystem behavior.
 
 ### D-013 — Keep the repository public and MIT licensed
 
-**Status:** Accepted
+Use a public GitHub repository, `main` as the default branch, and the MIT License.
 
-The GitHub repository will be public, use `main` as its default branch, and use the MIT License.
-
-**Why:** The project is intended to be resume-visible and easy for others to inspect.
+**Why:** The project is resume-visible and easy to inspect.
 
 ### D-014 — Use focused permanent docs and feature specs
 
-**Status:** Accepted
+Permanent truth lives in `README.md`, `AGENTS.md`, and `docs/`. Each meaningful feature uses `SPEC.md`, `PLAN.md`, and `TASKS.md` in a numbered `specs/` directory.
 
-Permanent truth is divided among `README.md`, `AGENTS.md`, `docs/PRODUCT.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`, and `docs/ROADMAP.md`. Each meaningful feature uses `SPEC.md`, `PLAN.md`, and `TASKS.md` under a numbered `specs/` folder.
+**Why:** Humans and agents should load only relevant context.
 
-**Why:** Agents and humans should load only the context relevant to the current task.
+## Rejected
 
-## Rejected Decisions
+### D-015 — Add a separate `RULES.md`
 
-### D-015 — Create a separate `RULES.md`
+Repository and agent rules stay in `AGENTS.md`; a second file would drift.
 
-**Status:** Rejected
+### D-016 — Pre-build the package and service hierarchy
 
-Repository and agent rules belong in `AGENTS.md`. A second rules file would duplicate authority and create drift.
+Add packages, services, and abstractions only when an active vertical slice requires them.
 
-### D-016 — Pre-build the full package and service hierarchy
+### D-017 — Use enterprise infrastructure for the MVP
 
-**Status:** Rejected
+Do not add microservices, Redis, Celery, Kafka, Kubernetes, or a complex multi-agent framework.
 
-Packages, abstractions, and services will be introduced when an active vertical slice requires them. Empty scaffolding would imply certainty the project does not yet have.
+## Deferred
 
-### D-017 — Use distributed or enterprise infrastructure for the MVP
+Decide these in the feature that first needs them:
 
-**Status:** Rejected
-
-The MVP will not use microservices, Redis, Celery, Kafka, Kubernetes, or a complex multi-agent framework.
-
-## Intentionally Deferred
-
-These choices will be made in the relevant feature spec when implementation provides enough evidence:
-
-- Exact package and class structure.
-- Database schema, repository methods, and SQLite access library.
+- Package and class structure.
+- Database schema, repository methods, and SQLite library.
 - Detection thresholds, correlation windows, and scoring formulas.
-- Number and arrangement of asynchronous workers and queues.
-- Exact model selections, prompts, and report wording.
-- Optional libraries not required by the active feature.
-- Cloud deployment, web or mobile interfaces, and multi-provider failover.
+- Async worker and queue arrangement.
+- Model selection, prompts, and report wording.
+- Optional libraries, deployment, interfaces, and provider failover.

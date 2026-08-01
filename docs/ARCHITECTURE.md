@@ -1,125 +1,82 @@
 # AI Investment Assistant — Architecture
 
-**Status:** Approved high-level architecture  
-**Last reviewed:** July 31, 2026
+**Status:** Approved
 
-## Document Purpose
-
-This document defines the system's stable structure, boundaries, data flow, and reliability model.
-
-Product scope belongs in [`PRODUCT.md`](PRODUCT.md). Development order belongs in [`ROADMAP.md`](ROADMAP.md). Exact behavior and implementation tasks belong under `specs/`.
-
-## System Overview
-
-The MVP is one local, single-process Python application. It monitors market and news data, identifies significant events, performs bounded research, saves the result, and sends one Discord notification.
+The MVP is one local, single-process Python application. It may use `asyncio` for concurrent I/O but has no microservices or distributed workers.
 
 ```mermaid
 flowchart TD
-    A["Market and news providers"] --> B["Normalize inputs"]
-    B --> C["Detect and classify signals"]
-    C --> D["Correlate one event"]
+    A["Market and news inputs"] --> B["Normalize"]
+    B --> C["Detect and classify"]
+    C --> D["Correlate event"]
     D -->|Significant| E["Assemble evidence"]
     E --> F["Bounded research"]
-    F --> G["Validate and persist report"]
+    F --> G["Validate and persist"]
     G --> H["Notify once"]
 ```
 
-The application uses `asyncio` where concurrent I/O is useful. It is not divided into microservices or distributed workers.
+Product behavior is defined in [`PRODUCT.md`](PRODUCT.md), durable choices in [`DECISIONS.md`](DECISIONS.md), and implementation details in feature specs.
 
-## Architectural Principles
+## Principles
 
-- **Deterministic logic before AI:** normal code handles measurable rules, filtering, cooldowns, and duplicate detection.
-- **Selective AI use:** a cheap news classifier is separate from the more capable research process.
-- **Provider independence:** provider SDK objects are converted into internal models before entering core logic.
-- **Application-controlled retrieval:** the application gathers evidence and exposes narrow tools; the model does not receive unrestricted access.
-- **One event, one report:** related signals enrich a durable event instead of creating repeated research jobs and alerts.
-- **Reliability before sophistication:** recovery, replay, deduplication, and cost controls take priority over additional indicators.
-- **Thin vertical slices:** abstractions are added at real replacement seams, not through speculative scaffolding.
+- Deterministic code handles measurable rules, filtering, cooldowns, and deduplication.
+- News classification is cheaper and separate from focused research.
+- Provider objects are normalized before entering core logic.
+- Research receives application-assembled evidence and narrow read-only tools.
+- Related signals enrich one durable event instead of creating repeated work.
+- Add abstractions only at demonstrated replacement seams.
 
-## Major Boundaries
+## Boundaries
 
-### Provider Layer
+### Input adapters
 
-Provider adapters connect to external services and normalize their responses.
+Adapters retrieve market and news data and convert provider responses into validated internal records. Alpaca is the first live provider, but its SDK types must not enter core logic. Replay fixtures use the same downstream boundaries.
 
-Core interfaces include:
+### Detection
 
-- `MarketDataProvider` for live and historical market data.
-- `NewsProvider` for company-related news.
-- A research boundary for producing a structured report.
-- A notification boundary for delivering completed reports.
+Detection consumes normalized records and produces signals. Market rules use explicit price, relative-market, volume, and optional volatility inputs. News passes deterministic filters before a small structured classifier. Failures remain visible without crashing the pipeline.
 
-The initial live market and news provider is Alpaca. Core detection and research logic must not depend on Alpaca SDK types.
+### Events
 
-### Detection Layer
+The event boundary owns correlation, significance, deduplication, cooldowns, lifecycle state, retry eligibility, and the decision to research materially new evidence. Market and news may arrive in either order; only one active event should represent the same ticker and topic.
 
-The detection layer consumes normalized inputs and produces scored signals.
+### Research
 
-- Market detection uses explicit price, relative-market, volume, and optional volatility rules.
-- News processing applies deterministic filters before calling a small structured classifier.
-- Failures are recorded and handled safely rather than stopping the pipeline.
+Research receives a prepared evidence packet only after an event qualifies. The application may expose bounded read-only access to market and news providers, SEC EDGAR, prior history, and hosted web search. The model receives no credentials or unrestricted database, filesystem, shell, or network access. Its output must match a validated schema.
 
-### Event Layer
+### Persistence
 
-The event layer combines related market and news signals into an `EventCandidate`. It owns:
-
-- Correlation by ticker, topic, category, and time window.
-- Significance decisions.
-- Deduplication and cooldowns.
-- Lifecycle state and retry eligibility.
-- Deciding whether new evidence justifies new research.
-
-Market and news signals may arrive in either order. Only one active event should exist for the same ticker and topic.
-
-### Research Layer
-
-The research layer receives a prepared evidence packet only after an event passes the significance threshold.
-
-It may retrieve additional evidence through bounded, read-only tools backed by:
-
-- Market and news providers.
-- SEC EDGAR.
-- Prior application history.
-- OpenAI hosted web search.
-
-The model receives neither credentials nor unrestricted database, filesystem, shell, or network access. Its output must match a validated structured schema.
-
-### Persistence Layer
-
-SQLite stores the durable state needed for history, recovery, deduplication, and replay, including:
+SQLite stores the state needed for recovery, history, replay, and idempotency:
 
 - Configuration and watchlist data.
 - Signals, articles, and classifications.
-- Event lifecycle state.
-- Reports and source metadata.
+- Event lifecycle and retry state.
+- Reports, source metadata, and provenance.
 - Notification attempts and failures.
-- Provider and feed provenance.
 
-Concurrent workers should write through one controlled database boundary or queue rather than independently coordinating SQLite writes.
+Writes pass through one controlled application boundary.
 
-### Output Layer
+### Output
 
-The output layer validates and persists a completed research report before attempting delivery.
+Validate and persist a report before delivery. Discord is the first live notification adapter. Retries are allowed, but the same report must not be sent twice.
 
-Discord is the initial live notification adapter. Delivery must be idempotent: retries may occur, but the same completed report must not be sent twice.
+## Core data
 
-## Core Data Contracts
+Exact fields and type names belong to feature specs, but these concepts are stable:
 
-Exact fields may evolve, but these concepts should remain stable:
+| Concept | Responsibility |
+| --- | --- |
+| Market record | Normalized price, volume, provider, feed, time, and completeness data |
+| Market signal | Detected condition, baseline, score, and provenance |
+| News article | Normalized identity, content metadata, symbols, source, and timestamps |
+| News classification | Relevance, category, direction, significance, confidence, and model metadata |
+| Event | Correlated signals, stable identity, significance, lifecycle, and deduplication state |
+| Research input | Evidence packet and focused questions |
+| Research report | Findings, evidence, competing explanations, uncertainty, confidence, and posture |
 
-| Contract | Responsibility |
-|---|---|
-| `MarketBar` | Normalized price and volume data with provider, feed, time, and completeness metadata |
-| `MarketSignal` | A detected market condition, its baseline, score, and provenance |
-| `NewsArticle` | Normalized article identity, content metadata, tickers, source, and timestamps |
-| `NewsClassification` | Structured relevance, category, direction, significance, confidence, and model metadata |
-| `EventCandidate` | Correlated signals, stable identity, significance, lifecycle, and deduplication state |
-| `ResearchEvent` | Evidence packet and focused questions supplied to research |
-| `ResearchReport` | Validated findings, evidence, competing explanations, uncertainty, confidence, and posture |
+Retain provider, feed, source, retrieval time, and model or prompt version wherever they affect interpretation or replay.
 
-Provider, feed, source, retrieval time, and model or prompt version should be retained wherever they affect interpretation or reproducibility.
-
-## Event Lifecycle
+## Event lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -133,65 +90,21 @@ stateDiagram-v2
     Updated --> Researching
 ```
 
-Lifecycle state must survive process restarts. A routine price update does not justify reopening a reported event; materially new evidence may.
+Lifecycle state survives restarts. Routine updates do not reopen a reported event; materially new evidence may.
 
-## Reliability Model
+## Reliability and security
 
-The application must make failures visible and recover safely.
-
-- Detect stale or disconnected streams.
-- Reconnect automatically and backfill missing minute bars where possible.
+- Detect stale streams, reconnect, and backfill missing bars where possible.
 - Persist event and notification state before irreversible actions.
-- Use stable identifiers and idempotent processing to prevent duplicate work.
-- Retry rate limits and transient failures with bounded backoff.
-- Record invalid model output, unavailable research, and delivery failures explicitly.
-- Enforce limits on classifier calls, research runs, tool calls, source size, time, and daily cost.
+- Use stable identifiers and idempotent processing.
+- Retry transient failures with bounded backoff.
+- Record invalid model output and unavailable research or delivery.
+- Enforce classifier, research, tool, source-size, time, rate, and cost limits.
 - Expose structured logs and basic health information.
+- Load credentials from the environment; never place them in fixtures, logs, or prompts.
+- Validate external input and model output at their boundaries.
+- Provide no brokerage or order-execution capability.
 
-Replay fixtures must pass through the same core detection, event, research, and notification boundaries used by live operation.
+## First slice
 
-## Security Boundaries
-
-- Credentials come from environment-based configuration and never enter the repository, fixtures, logs, or model prompts.
-- External inputs and model outputs are validated before use.
-- Research tools are narrow, read-only, and application-controlled.
-- The system has no brokerage connection or order-execution capability.
-- Notification payloads contain only the information required for the alert.
-
-## First Implementation Slice
-
-The offline walking skeleton proves the real internal flow before external integrations are introduced:
-
-```text
-JSON fixtures
-  → normalization
-  → deterministic detection
-  → signal correlation
-  → event
-  → fake structured research report
-  → console notification
-```
-
-It uses fake providers and no internet, secrets, database, LLM, Alpaca, SEC, or Discord access. Later milestones replace those adapters while preserving the core flow.
-
-## Stable and Flexible Decisions
-
-Stable architecture:
-
-- One modular local Python application for the MVP.
-- Provider-neutral internal models and narrow service interfaces.
-- Deterministic detection before AI escalation.
-- Separate news classification and research responsibilities.
-- Durable correlated events, structured outputs, and idempotent notification.
-- SQLite persistence, replay fixtures, and bounded read-only research tools.
-
-Intentionally flexible:
-
-- Exact package and class structure.
-- Database schema and repository method names.
-- Worker count and queue arrangement.
-- Thresholds, correlation windows, and scoring formulas.
-- Model choices, prompts, and report wording.
-- Optional libraries not required by the active feature.
-
-Changes to stable architecture require an entry in [`DECISIONS.md`](DECISIONS.md). Flexible details should be decided within the relevant feature spec when implementation evidence exists.
+The approved [offline walking skeleton](../specs/001-offline-walking-skeleton/SPEC.md) proves these boundaries with fixtures, fake research, and console output before any live integration or database is added.
