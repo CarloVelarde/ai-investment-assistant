@@ -1,6 +1,6 @@
 # Feature Specification: Offline Walking Skeleton
 
-**Status:** Draft
+**Document status:** Approved
 
 ## Purpose
 
@@ -14,7 +14,7 @@ JSON fixtures
 → deterministic detection
 → signal correlation
 → event
-→ fake research report
+→ fake structured research report
 → console notification
 ```
 
@@ -23,14 +23,14 @@ JSON fixtures
 ### In scope
 
 - Read market and news data from local JSON fixtures.
-- Normalize provider-specific fixture data into internal market and news records.
+- Normalize fixture-shaped data into internal market and news records.
 - Evaluate one deterministic market rule.
 - Evaluate one deterministic news filter.
 - Correlate related market and news signals.
 - Create a significant event when the required signals match.
 - Use a controllable clock so scenarios are deterministic.
-- Generate a fake research report for a created event.
-- Print a console notification containing the event and research result.
+- Generate a fake structured research report for a created event.
+- Emit a console notification containing the event and research result.
 - Support one triggering scenario.
 - Support one non-triggering scenario.
 
@@ -59,7 +59,7 @@ Given local market and news fixtures for the same tracked symbol:
 3. The signals occur within the allowed correlation window.
 4. The system creates one significant event.
 5. Fake research produces one report for that event.
-6. The system prints one console notification.
+6. The system emits one console notification.
 
 ### Non-triggering scenario
 
@@ -85,7 +85,7 @@ For a triggering scenario:
 - One normalized market record.
 - One normalized news record.
 - One correlated significant event.
-- One fake research report.
+- One fake structured research report.
 - One console notification.
 
 For a non-triggering scenario:
@@ -96,30 +96,26 @@ For a non-triggering scenario:
 
 ## Acceptance criteria
 
-- [ ] The complete pipeline runs locally without internet access.
-- [ ] Market data is loaded from a JSON fixture and normalized.
-- [ ] News data is loaded from a JSON fixture and normalized.
-- [ ] One deterministic market rule can produce a market signal.
-- [ ] One deterministic news filter can produce a news signal.
-- [ ] Related qualifying signals can be correlated by symbol and time.
-- [ ] A correlated signal pair creates exactly one significant event.
-- [ ] Fake research runs only after an event is created.
-- [ ] A triggering fixture scenario prints exactly one event notification.
-- [ ] A non-triggering fixture scenario creates no event and runs no research.
-- [ ] Tests use a controllable clock and do not depend on the real current time.
-- [ ] The feature requires no external service, API key, database, or network connection.
-- [ ] Ruff, mypy, and pytest pass once project tooling is configured.
+- [ ] AC-01: The complete pipeline runs locally through the existing console entry point without internet access.
+- [ ] AC-02: Market data is loaded from a JSON fixture and normalized into an internal record.
+- [ ] AC-03: News data is loaded from a JSON fixture and normalized into an internal record.
+- [ ] AC-04: One deterministic market rule can produce a market signal.
+- [ ] AC-05: One deterministic news filter can produce a news signal.
+- [ ] AC-06: Related qualifying signals can be correlated by normalized symbol and time.
+- [ ] AC-07: A correlated signal pair creates exactly one significant event.
+- [ ] AC-08: Fake research runs only after an event is created.
+- [ ] AC-09: A triggering fixture scenario emits exactly one event notification containing the event and fake research report.
+- [ ] AC-10: A non-triggering fixture scenario creates no event, runs no research, and emits no event notification.
+- [ ] AC-11: Tests use a controllable clock and do not depend on the real current time.
+- [ ] AC-12: The feature requires no external service, API key, database, or network connection.
+- [ ] AC-13: Ruff formatting and linting, mypy, and pytest pass.
 
 ## Constraints
 
 - Keep the implementation small and synchronous.
 - Prefer explicit code over premature abstractions.
-- Add only the modules and interfaces required by this vertical slice.
-- Fake providers must remain replaceable later without coupling detection logic to fixture formats.
+- Keep fixture parsing at the input boundary so core logic only receives internal records.
+- Do not add general provider or service hierarchies; add only boundaries exercised by this slice.
 - Detection and correlation behavior must be deterministic.
 - The fake research report must be clearly identified as generated test output, not real investment analysis.
 - This feature must not make or execute investment decisions.
-
-## Open questions
-
-- The exact market-rule threshold, news-filter condition, and correlation window will be selected in `PLAN.md`.
