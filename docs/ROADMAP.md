@@ -4,7 +4,7 @@
 
 ## Current focus
 
-**Milestone 1 — Offline walking skeleton** is approved and ready to implement. Its execution status remains not started.
+**Milestone 2 — Durable event foundation** is next. Its feature spec must be approved before implementation; Milestone 1 is complete.
 
 ## Milestones
 
@@ -18,13 +18,13 @@ Provide a runnable Python package, configuration and logging foundations, `uv` d
 
 ### Milestone 1 — Offline walking skeleton
 
-**Status:** Not started
+**Status:** Complete
 
 **Spec:** [`specs/001-offline-walking-skeleton/`](../specs/001-offline-walking-skeleton/SPEC.md)
 
 Prove the complete internal flow with local fixtures, deterministic rules, fake research, and console notification. Use one triggering and one non-triggering scenario; add no external service or database.
 
-**Complete when:** the pipeline and its deterministic end-to-end tests pass.
+**Completed:** The deterministic pipeline, triggering and non-triggering end-to-end tests, packaged fixtures, and repository checks pass.
 
 ### Milestone 2 — Durable event foundation
 

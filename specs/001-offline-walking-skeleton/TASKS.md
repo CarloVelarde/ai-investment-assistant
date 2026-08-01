@@ -2,7 +2,7 @@
 
 **Document status:** Approved
 
-**Execution status:** In progress
+**Execution status:** Complete
 
 ## Tasks
 
@@ -15,7 +15,7 @@
 - [x] 7. Wire the pipeline into the existing console entry point without changing its configuration or logging bootstrap.
 - [x] 8. Add the triggering end-to-end test for one event, report, and notification.
 - [x] 9. Add the non-triggering end-to-end test for no event, research, or notification.
-- [ ] 10. Confirm no external dependency or runtime path was added, then run all repository checks.
+- [x] 10. Confirm no external dependency or runtime path was added, then run all repository checks.
 
 ## Acceptance coverage
 
