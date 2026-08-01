@@ -40,3 +40,14 @@ class MarketSignal:
     volume_ratio: Decimal
     provider: str
     feed: str
+
+
+@dataclass(frozen=True, slots=True)
+class NewsSignal:
+    """A news record that passed the walking-skeleton filter."""
+
+    symbol: str
+    occurred_at: datetime
+    matched_phrase: str
+    headline: str
+    source: str
