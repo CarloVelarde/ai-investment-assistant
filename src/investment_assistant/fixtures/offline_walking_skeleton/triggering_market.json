@@ -1,0 +1,10 @@
+{
+  "ticker": " acme ",
+  "latest_price": 94.0,
+  "previous_close": 100.0,
+  "current_volume": 1600000,
+  "average_volume": 1000000,
+  "observed_at": "2026-01-15T09:30:00-06:00",
+  "provider": "fixture",
+  "feed": "offline-demo"
+}

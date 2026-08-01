@@ -2,11 +2,11 @@
 
 **Document status:** Approved
 
-**Execution status:** Not started
+**Execution status:** In progress
 
 ## Tasks
 
-- [ ] 1. Add both fixture pairs, minimal records, fixture readers, and normalization with focused tests.
+- [x] 1. Add both fixture pairs, minimal records, fixture readers, and normalization with focused tests.
 - [ ] 2. Add injected current time and a fixed test implementation; prove core logic does not read the real clock.
 - [ ] 3. Implement the inclusive market rule with passing, failing, and boundary tests.
 - [ ] 4. Implement fixed-phrase news filtering with passing and failing headline, summary, and case tests.
