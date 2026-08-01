@@ -7,7 +7,7 @@
 ## Tasks
 
 - [x] 1. Add both fixture pairs, minimal records, fixture readers, and normalization with focused tests.
-- [ ] 2. Add injected current time and a fixed test implementation; prove core logic does not read the real clock.
+- [x] 2. Add injected current time and a fixed test implementation; prove core logic does not read the real clock.
 - [ ] 3. Implement the inclusive market rule with passing, failing, and boundary tests.
 - [ ] 4. Implement fixed-phrase news filtering with passing and failing headline, summary, and case tests.
 - [ ] 5. Correlate signals into exactly one event; test normalized-symbol matching and times inside, at, and outside 60 minutes.
