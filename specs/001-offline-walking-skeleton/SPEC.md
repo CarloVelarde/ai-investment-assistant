@@ -33,16 +33,16 @@ The non-triggering pair does not produce both required signals. It produces no e
 
 ## Acceptance criteria
 
-- [ ] AC-01: The complete pipeline runs through the existing console entry point without internet access.
-- [ ] AC-02: Market and news JSON fixtures load into normalized internal records.
-- [ ] AC-03: The single market rule and news filter produce their respective signals when their conditions pass.
-- [ ] AC-04: One qualifying same-symbol pair within the time window creates exactly one event.
-- [ ] AC-05: Fake structured research runs only after event creation.
-- [ ] AC-06: The triggering scenario emits exactly one event notification containing the event and fake report.
-- [ ] AC-07: The non-triggering scenario creates no event, runs no research, and emits no event notification.
-- [ ] AC-08: Tests control time and never depend on the real clock.
-- [ ] AC-09: The feature adds no external service, secret, database, or network dependency.
-- [ ] AC-10: Ruff formatting and linting, mypy, and pytest pass.
+- [x] AC-01: The complete pipeline runs through the existing console entry point without internet access.
+- [x] AC-02: Market and news JSON fixtures load into normalized internal records.
+- [x] AC-03: The single market rule and news filter produce their respective signals when their conditions pass.
+- [x] AC-04: One qualifying same-symbol pair within the time window creates exactly one event.
+- [x] AC-05: Fake structured research runs only after event creation.
+- [x] AC-06: The triggering scenario emits exactly one event notification containing the event and fake report.
+- [x] AC-07: The non-triggering scenario creates no event, runs no research, and emits no event notification.
+- [x] AC-08: Tests control time and never depend on the real clock.
+- [x] AC-09: The feature adds no external service, secret, database, or network dependency.
+- [x] AC-10: Ruff formatting and linting, mypy, and pytest pass.
 
 ## Constraints
 
