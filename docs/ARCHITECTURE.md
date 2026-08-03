@@ -43,17 +43,17 @@ Adapters retrieve market and news data and convert provider responses into valid
 
 Detection consumes normalized records and only produces signals; it does not enqueue research.
 
-- The fast market detector evaluates completed bars for abrupt movement and emits only on a qualifying threshold crossing.
+- The fast market detector evaluates completed bars for abrupt movement and emits only on a qualifying threshold crossing or material severity escalation; same-severity continuation stays quiet until rearm.
 - The after-close daily market detector uses the same history to evaluate five- and twenty-trading-day movement, recent-high drawdown, and performance relative to `SPY`.
 - News passes deterministic filters before a small structured classifier and may emit a significant news signal without a market signal.
 
-There is no separate weekly pipeline. Exact thresholds, severity boundaries, and rearm rules remain feature-level decisions. Detection failures remain visible without crashing the application.
+There is no separate weekly pipeline. Exact thresholds, severity boundaries, and rearm rules are feature-level decisions (Milestone 3 owns the first offline market set). Detector baseline state is durable for replay. Detection failures remain visible without crashing the application.
 
 ### Events
 
 The event manager consumes all qualifying signals and alone owns correlation, promotion, deduplication, cooldowns, lifecycle state, retry eligibility, and research eligibility. A market or significant news signal may create an event by itself; later related signals enrich it.
 
-Sustained directional movement is one evolving episode. Same-severity repeats are retained without repeated work. A worse severity, a newly crossed horizon, or significant new news may update and requeue the episode. Rejected inputs create no event or cooldown; notification cooldown begins only after successful delivery.
+Sustained directional movement is one evolving **open** episode. Same-severity repeats are retained without repeated work. A worse severity, a newly crossed horizon, or significant new news may update and requeue the episode. When market detector stress for that ticker and direction has fully rearmed/cleared, the episode closes so a later unrelated breach starts a new event rather than reopening finished history. Rejected inputs create no event or cooldown; notification cooldown begins only after successful delivery.
 
 ### Research
 
@@ -125,6 +125,10 @@ Lifecycle state survives restarts. Interrupted research resumes research, while 
 - Validate external input and model output at their boundaries.
 - Provide no brokerage or order-execution capability.
 
-## First slice
+## First slices
 
-The completed [offline walking skeleton](../specs/001-offline-walking-skeleton/SPEC.md) proves the internal boundaries with one paired market-and-news scenario. That demonstration does not make news a gate for market events or market movement a gate for significant news. Later milestones add durable independent triggers, broader market detection, and live integrations in that order.
+- [Offline walking skeleton](../specs/001-offline-walking-skeleton/SPEC.md) proved fixtures → detection → event → fake research → console notify without live services.
+- [Durable event foundation](../specs/002-durable-event-foundation/SPEC.md) added SQLite lifecycle state and independent market/news promotion through one event manager.
+- [Market history and offline detection](../specs/003-market-history-and-offline-detection/SPEC.md) adds persisted bars, fast/daily deterministic market rules, detector rearm state, and open/closed market episodes.
+
+That path does not make news a gate for market events or market movement a gate for significant news. Later milestones add live market data, news classification, real research, and Discord in roadmap order.

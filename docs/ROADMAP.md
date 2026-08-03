@@ -4,7 +4,7 @@
 
 ## Current focus
 
-**Milestone 3 — Market history and offline detection** is next. Its feature spec must be approved before implementation.
+**Milestone 3 — Market history and offline detection** is active. The feature spec is approved; implementation may proceed from the task list.
 
 ## Milestones
 
@@ -38,14 +38,16 @@ Add SQLite-backed signal, evolving-event, research, notification, and failure st
 
 ### Milestone 3 — Market history and offline detection
 
-**Status:** Not started
+**Status:** Spec approved — implementation not started
+
+**Spec:** [`specs/003-market-history-and-offline-detection/`](../specs/003-market-history-and-offline-detection/SPEC.md)
 
 Persist normalized replay bars and implement two deterministic evaluation modes over the same history and signal contract:
 
 - A fast detector for abrupt movement on completed bars.
 - One fixed after-close daily scan for five- and twenty-trading-day movement, recent-high drawdown, and performance relative to `SPY`.
 
-Define explicit thresholds, severity levels, crossing, rearm, and episode-closing rules in the feature spec. Add no separate weekly process or configurable cadence initially.
+Explicit thresholds, severity levels, crossing, rearm, and episode-closing rules live in the feature spec. Add no separate weekly process or configurable cadence initially.
 
 **Complete when:** offline abrupt-drop, gradual-decline, continuation, escalation, recovery, and broad-market scenarios produce understandable signals and one correctly updated event episode without duplicate research.
 

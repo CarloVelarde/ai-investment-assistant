@@ -113,6 +113,18 @@ This refines D-006: sustained movement belongs to one evolving episode, but a ma
 
 **Why:** Suppression should reduce noise without hiding meaningful deterioration or later explanations.
 
+### D-021 — Offline market history uses fixed dual detectors and open episodes
+
+Milestone 3 fixes offline market evaluation as follows:
+
+- Persist normalized completed bars for watchlist symbols and `SPY`; evaluate only completed bars.
+- One fast detector (`abrupt_move` / one-hour) and one after-close daily detector (`multi_day_move`, `drawdown_from_high`, `relative_to_spy`) share the Milestone 2 signal contract and event manager.
+- Thresholds, importance steps, volume dampening for the fast rule, crossing, and rearm (rearm line = half the `MODERATE` magnitude) are defined in the Milestone 3 feature spec, not left open.
+- Detector baseline state is durable so replay does not re-fire settled crossings.
+- Market events track `episode_open`; grouping attaches same-direction market signals only to open episodes. An episode closes when all detector keys for that ticker and direction are clear/armed after daily evaluation. Close does not research by itself; a later new breach creates a new event.
+
+**Why:** Agents and humans need explicit, testable market rules; forever-open episodes would merge unrelated later moves into old stories.
+
 ## Rejected
 
 ### D-015 — Add a separate `RULES.md`
@@ -131,10 +143,13 @@ Do not add microservices, Redis, Celery, Kafka, Kubernetes, or a complex multi-a
 
 Decide these in the feature that first needs them:
 
-- Package and class structure.
-- Detection thresholds, correlation windows, severity boundaries, and rearm rules.
+- Package and class structure beyond what active milestones already introduced.
+- User-configurable detection thresholds and correlation windows (Milestone 3 ships fixed defaults; configuration can come later).
 - Async worker and queue arrangement.
 - Model selection, prompts, and report wording.
 - Optional libraries, deployment, interfaces, and provider failover.
-- Market episode open/close rules so grouping does not forever reopen a finished same-direction event (Milestone 3 owns trend end; must define what “closed” means for matching).
 - Strong live-delivery claim/recovery (for example mark delivery in progress before an external send, and reconcile “sent but not recorded”) when Discord and production notification land (Milestone 7). Milestone 2 only re-checks current update before notify and honors a refused notify save.
+
+Resolved in feature specs / accepted decisions above when applicable:
+
+- Detection thresholds, severity, rearm, and market episode open/close → D-021 and Milestone 3 spec.
