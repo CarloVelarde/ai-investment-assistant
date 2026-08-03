@@ -144,7 +144,112 @@ def test_same_direction_market_signals_group_into_one_event(tmp_path: Path) -> N
             MarketWindow.ONE_HOUR,
             MarketWindow.FIVE_DAYS,
         )
+        assert second.event.current_update == 2
+        assert second.event.status is EventStatus.QUEUED
         assert len(storage.list_signals(second.event.event_id)) == 2
+
+
+def test_same_or_lower_importance_is_saved_without_reopening_event(
+    tmp_path: Path,
+) -> None:
+    same_importance = replace(
+        MARKET_SIGNAL,
+        signal_id="market-acme-down-2",
+        occurred_at=SIGNAL_TIME + timedelta(minutes=1),
+    )
+    lower_importance = replace(
+        MARKET_SIGNAL,
+        signal_id="market-acme-down-3",
+        occurred_at=SIGNAL_TIME + timedelta(minutes=2),
+        importance=SignalImportance.MODERATE,
+    )
+    with SQLiteStorage(tmp_path / "routine-signals.sqlite3") as storage:
+        storage.initialize()
+        manager = EventManager(storage, clock=FixedClock(EVENT_TIME))
+        initial = manager.handle_signal(MARKET_SIGNAL)
+        assert initial.event is not None
+        storage.save_event(replace(initial.event, status=EventStatus.NOTIFIED))
+
+        same_result = manager.handle_signal(same_importance)
+        lower_result = manager.handle_signal(lower_importance)
+
+        assert same_result.event is not None
+        assert lower_result.event is not None
+        assert same_result.event.current_update == 1
+        assert lower_result.event.current_update == 1
+        assert lower_result.event.status is EventStatus.NOTIFIED
+        assert len(storage.list_signals(lower_result.event.event_id)) == 3
+
+
+def test_higher_importance_requeues_existing_event(tmp_path: Path) -> None:
+    moderate_signal = replace(
+        MARKET_SIGNAL,
+        importance=SignalImportance.MODERATE,
+    )
+    higher_signal = replace(
+        MARKET_SIGNAL,
+        signal_id="market-acme-down-2",
+        occurred_at=SIGNAL_TIME + timedelta(minutes=1),
+    )
+    with SQLiteStorage(tmp_path / "higher-importance.sqlite3") as storage:
+        storage.initialize()
+        manager = EventManager(storage, clock=FixedClock(EVENT_TIME))
+        first = manager.handle_signal(moderate_signal)
+        assert first.event is not None
+        storage.save_event(replace(first.event, status=EventStatus.NOTIFIED))
+
+        result = manager.handle_signal(higher_signal)
+
+        assert result.event is not None
+        assert result.event.current_update == 2
+        assert result.event.importance is SignalImportance.HIGH
+        assert result.event.status is EventStatus.QUEUED
+
+
+def test_new_significant_news_requeues_regardless_of_importance(
+    tmp_path: Path,
+) -> None:
+    lower_news = replace(NEWS_SIGNAL, importance=SignalImportance.MODERATE)
+    with SQLiteStorage(tmp_path / "new-news.sqlite3") as storage:
+        storage.initialize()
+        manager = EventManager(storage, clock=FixedClock(EVENT_TIME))
+        first = manager.handle_signal(MARKET_SIGNAL)
+        assert first.event is not None
+        storage.save_event(replace(first.event, status=EventStatus.NOTIFIED))
+
+        result = manager.handle_signal(lower_news)
+
+        assert result.event is not None
+        assert result.event.current_update == 2
+        assert result.event.importance is SignalImportance.HIGH
+        assert result.event.status is EventStatus.QUEUED
+
+
+def test_several_important_signals_advance_to_latest_update(tmp_path: Path) -> None:
+    moderate = replace(MARKET_SIGNAL, importance=SignalImportance.MODERATE)
+    higher = replace(
+        MARKET_SIGNAL,
+        signal_id="market-acme-down-2",
+        occurred_at=SIGNAL_TIME + timedelta(minutes=1),
+    )
+    new_window = replace(
+        higher,
+        signal_id="market-acme-down-3",
+        occurred_at=SIGNAL_TIME + timedelta(minutes=2),
+        window=MarketWindow.FIVE_DAYS,
+    )
+    with SQLiteStorage(tmp_path / "latest-update.sqlite3") as storage:
+        storage.initialize()
+        manager = EventManager(storage, clock=FixedClock(EVENT_TIME))
+
+        manager.handle_signal(moderate)
+        manager.handle_signal(higher)
+        manager.handle_signal(new_window)
+        result = manager.handle_signal(NEWS_SIGNAL)
+
+        assert result.event is not None
+        assert result.event.current_update == 4
+        assert result.event.status is EventStatus.QUEUED
 
 
 def test_news_uses_category_when_there_is_no_directional_market_match(

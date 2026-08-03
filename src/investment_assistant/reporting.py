@@ -3,7 +3,12 @@
 import logging
 from collections.abc import Callable
 
-from investment_assistant.models import ResearchReport, SignificantEvent
+from investment_assistant.models import (
+    Event,
+    ResearchReport,
+    Signal,
+    SignificantEvent,
+)
 
 FAKE_RESEARCH_PREFIX = "FAKE RESEARCH — NOT INVESTMENT ANALYSIS"
 EVENT_NOTIFICATION_PREFIX = "EVENT NOTIFICATION"
@@ -28,6 +33,27 @@ def create_fake_research_report(event: SignificantEvent) -> ResearchReport:
         summary=(
             f"{FAKE_RESEARCH_PREFIX}: {event.symbol} has correlated market and news "
             f"signals matching '{event.news_signal.matched_phrase}'."
+        ),
+        is_fake=True,
+    )
+
+
+def create_fake_durable_research_report(
+    event: Event,
+    signals: tuple[Signal, ...],
+) -> ResearchReport:
+    """Create fixed offline research for one durable event update."""
+
+    return ResearchReport(
+        report_id=f"report:{event.event_id}:{event.current_update}",
+        event_id=event.event_id,
+        event_update=event.current_update,
+        ticker=event.ticker,
+        event_occurred_at=event.created_at,
+        created_at=event.updated_at,
+        summary=(
+            f"{FAKE_RESEARCH_PREFIX}: {event.ticker} event update "
+            f"{event.current_update} includes {len(signals)} qualifying signal(s)."
         ),
         is_fake=True,
     )

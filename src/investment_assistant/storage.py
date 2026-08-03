@@ -185,6 +185,37 @@ class SQLiteStorage:
         ).fetchall()
         return tuple(_event_from_row(row) for row in rows)
 
+    def mark_researching(
+        self,
+        event_id: str,
+        event_update: int,
+        *,
+        updated_at: datetime,
+    ) -> Event | None:
+        """Persist research start for the current event update."""
+
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                UPDATE events
+                SET status = ?, updated_at = ?
+                WHERE event_id = ? AND current_update = ?
+                  AND status IN (?, ?, ?)
+                """,
+                (
+                    EventStatus.RESEARCHING.value,
+                    _timestamp(updated_at),
+                    event_id,
+                    event_update,
+                    EventStatus.QUEUED.value,
+                    EventStatus.RESEARCHING.value,
+                    EventStatus.FAILED.value,
+                ),
+            )
+            if cursor.rowcount != 1:
+                return None
+        return self.get_event(event_id)
+
     def find_direction_events(
         self,
         ticker: str,
@@ -270,24 +301,45 @@ class SQLiteStorage:
         """Persist one report for a specific event update."""
 
         with self._connection:
-            self._connection.execute(
+            self._write_report(report)
+
+    def save_report_and_mark_reported(
+        self,
+        report: ResearchReport,
+        *,
+        updated_at: datetime,
+    ) -> bool:
+        """Atomically save a current report and mark it ready for delivery."""
+
+        with self._connection:
+            current = self._connection.execute(
                 """
-                INSERT INTO reports (
-                    report_id, event_id, event_update, ticker,
-                    event_occurred_at, created_at, summary, is_fake
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                SELECT 1 FROM events
+                WHERE event_id = ? AND current_update = ? AND status = ?
                 """,
                 (
-                    report.report_id,
                     report.event_id,
                     report.event_update,
-                    report.ticker,
-                    _timestamp(report.event_occurred_at),
-                    _timestamp(report.created_at),
-                    report.summary,
-                    int(report.is_fake),
+                    EventStatus.RESEARCHING.value,
+                ),
+            ).fetchone()
+            if current is None:
+                return False
+            self._write_report(report)
+            self._connection.execute(
+                """
+                UPDATE events
+                SET status = ?, updated_at = ?
+                WHERE event_id = ? AND current_update = ?
+                """,
+                (
+                    EventStatus.REPORTED.value,
+                    _timestamp(updated_at),
+                    report.event_id,
+                    report.event_update,
                 ),
             )
+        return True
 
     def get_report(self, report_id: str) -> ResearchReport | None:
         """Reload a report by ID."""
@@ -296,39 +348,106 @@ class SQLiteStorage:
             "SELECT * FROM reports WHERE report_id = ?",
             (report_id,),
         ).fetchone()
-        if row is None:
-            return None
-        return ResearchReport(
-            report_id=str(row["report_id"]),
-            event_id=str(row["event_id"]),
-            event_update=int(row["event_update"]),
-            ticker=str(row["ticker"]),
-            event_occurred_at=_datetime(row["event_occurred_at"]),
-            created_at=_datetime(row["created_at"]),
-            summary=str(row["summary"]),
-            is_fake=bool(row["is_fake"]),
-        )
+        return None if row is None else _report_from_row(row)
+
+    def get_report_for_update(
+        self,
+        event_id: str,
+        event_update: int,
+    ) -> ResearchReport | None:
+        """Reload the report for one event update."""
+
+        row = self._connection.execute(
+            "SELECT * FROM reports WHERE event_id = ? AND event_update = ?",
+            (event_id, event_update),
+        ).fetchone()
+        return None if row is None else _report_from_row(row)
+
+    def list_reports(self, event_id: str) -> tuple[ResearchReport, ...]:
+        """Reload all reports for an event in update order."""
+
+        rows = self._connection.execute(
+            "SELECT * FROM reports WHERE event_id = ? ORDER BY event_update",
+            (event_id,),
+        ).fetchall()
+        return tuple(_report_from_row(row) for row in rows)
 
     def save_notification_attempt(self, attempt: NotificationAttempt) -> None:
         """Persist one notification attempt."""
 
         with self._connection:
-            self._connection.execute(
+            self._write_notification_attempt(attempt)
+
+    def save_notification_result(
+        self,
+        attempt: NotificationAttempt,
+        *,
+        failure: ProcessingFailure | None,
+        updated_at: datetime,
+    ) -> bool:
+        """Atomically save an attempt and its resulting event state."""
+
+        if attempt.succeeded == (failure is not None):
+            raise ValueError("failed attempts require one failure record")
+        if failure is not None and (
+            failure.event_id != attempt.event_id
+            or failure.event_update != attempt.event_update
+            or failure.step is not FailureStep.NOTIFICATION
+        ):
+            raise ValueError("notification failure must match its attempt")
+        with self._connection:
+            current = self._connection.execute(
                 """
-                INSERT INTO notification_attempts (
-                    attempt_id, event_id, event_update, attempted_at,
-                    succeeded, safe_error
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                SELECT 1 FROM events
+                WHERE event_id = ? AND current_update = ?
+                  AND status IN (?, ?)
+                  AND EXISTS (
+                      SELECT 1 FROM reports
+                      WHERE reports.event_id = events.event_id
+                        AND reports.event_update = events.current_update
+                  )
                 """,
                 (
-                    attempt.attempt_id,
                     attempt.event_id,
                     attempt.event_update,
-                    _timestamp(attempt.attempted_at),
-                    int(attempt.succeeded),
-                    attempt.safe_error,
+                    EventStatus.REPORTED.value,
+                    EventStatus.FAILED.value,
                 ),
-            )
+            ).fetchone()
+            if current is None:
+                return False
+            self._write_notification_attempt(attempt)
+            if failure is None:
+                self._connection.execute(
+                    """
+                    UPDATE events
+                    SET status = ?, updated_at = ?, last_notified_at = ?
+                    WHERE event_id = ? AND current_update = ?
+                    """,
+                    (
+                        EventStatus.NOTIFIED.value,
+                        _timestamp(updated_at),
+                        _timestamp(attempt.attempted_at),
+                        attempt.event_id,
+                        attempt.event_update,
+                    ),
+                )
+            else:
+                self._write_failure(failure)
+                self._connection.execute(
+                    """
+                    UPDATE events
+                    SET status = ?, updated_at = ?
+                    WHERE event_id = ? AND current_update = ?
+                    """,
+                    (
+                        EventStatus.FAILED.value,
+                        _timestamp(updated_at),
+                        attempt.event_id,
+                        attempt.event_update,
+                    ),
+                )
+        return True
 
     def list_notification_attempts(
         self,
@@ -338,7 +457,7 @@ class SQLiteStorage:
 
         rows = self._connection.execute(
             "SELECT * FROM notification_attempts WHERE event_id = ? "
-            "ORDER BY attempted_at, attempt_id",
+            "ORDER BY attempted_at, rowid",
             (event_id,),
         ).fetchall()
         return tuple(
@@ -357,44 +476,65 @@ class SQLiteStorage:
         """Persist one safe processing failure."""
 
         with self._connection:
+            self._write_failure(failure)
+
+    def save_failure_and_mark_failed(
+        self,
+        failure: ProcessingFailure,
+        *,
+        updated_at: datetime,
+    ) -> bool:
+        """Atomically save a current processing failure and failed state."""
+
+        with self._connection:
+            current = self._connection.execute(
+                "SELECT 1 FROM events WHERE event_id = ? AND current_update = ?",
+                (failure.event_id, failure.event_update),
+            ).fetchone()
+            if current is None:
+                return False
+            self._write_failure(failure)
             self._connection.execute(
                 """
-                INSERT INTO failures (
-                    failure_id, event_id, event_update, step, retryable,
-                    occurred_at, description
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                UPDATE events
+                SET status = ?, updated_at = ?
+                WHERE event_id = ? AND current_update = ?
                 """,
                 (
-                    failure.failure_id,
+                    EventStatus.FAILED.value,
+                    _timestamp(updated_at),
                     failure.event_id,
                     failure.event_update,
-                    failure.step.value,
-                    int(failure.retryable),
-                    _timestamp(failure.occurred_at),
-                    failure.description,
                 ),
             )
+        return True
 
     def list_failures(self, event_id: str) -> tuple[ProcessingFailure, ...]:
         """Reload failures for an event."""
 
         rows = self._connection.execute(
-            "SELECT * FROM failures WHERE event_id = ? "
-            "ORDER BY occurred_at, failure_id",
+            "SELECT * FROM failures WHERE event_id = ? ORDER BY occurred_at, rowid",
             (event_id,),
         ).fetchall()
-        return tuple(
-            ProcessingFailure(
-                failure_id=str(row["failure_id"]),
-                event_id=str(row["event_id"]),
-                event_update=int(row["event_update"]),
-                step=FailureStep(str(row["step"])),
-                retryable=bool(row["retryable"]),
-                occurred_at=_datetime(row["occurred_at"]),
-                description=str(row["description"]),
-            )
-            for row in rows
-        )
+        return tuple(_failure_from_row(row) for row in rows)
+
+    def get_latest_failure(
+        self,
+        event_id: str,
+        event_update: int,
+    ) -> ProcessingFailure | None:
+        """Reload the newest failure for one event update."""
+
+        row = self._connection.execute(
+            """
+            SELECT * FROM failures
+            WHERE event_id = ? AND event_update = ?
+            ORDER BY rowid DESC
+            LIMIT 1
+            """,
+            (event_id, event_update),
+        ).fetchone()
+        return None if row is None else _failure_from_row(row)
 
     def _write_event(self, event: Event) -> None:
         self._connection.execute(
@@ -489,6 +629,63 @@ class SQLiteStorage:
             (*common_values, *specific_values),
         )
 
+    def _write_report(self, report: ResearchReport) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO reports (
+                report_id, event_id, event_update, ticker,
+                event_occurred_at, created_at, summary, is_fake
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                report.report_id,
+                report.event_id,
+                report.event_update,
+                report.ticker,
+                _timestamp(report.event_occurred_at),
+                _timestamp(report.created_at),
+                report.summary,
+                int(report.is_fake),
+            ),
+        )
+
+    def _write_notification_attempt(self, attempt: NotificationAttempt) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO notification_attempts (
+                attempt_id, event_id, event_update, attempted_at,
+                succeeded, safe_error
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                attempt.attempt_id,
+                attempt.event_id,
+                attempt.event_update,
+                _timestamp(attempt.attempted_at),
+                int(attempt.succeeded),
+                attempt.safe_error,
+            ),
+        )
+
+    def _write_failure(self, failure: ProcessingFailure) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO failures (
+                failure_id, event_id, event_update, step, retryable,
+                occurred_at, description
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                failure.failure_id,
+                failure.event_id,
+                failure.event_update,
+                failure.step.value,
+                int(failure.retryable),
+                _timestamp(failure.occurred_at),
+                failure.description,
+            ),
+        )
+
 
 def _event_from_row(row: sqlite3.Row) -> Event:
     windows = _market_windows(row["market_windows"])
@@ -505,6 +702,31 @@ def _event_from_row(row: sqlite3.Row) -> Event:
         created_at=_datetime(row["created_at"]),
         updated_at=_datetime(row["updated_at"]),
         last_notified_at=_optional_datetime(row["last_notified_at"]),
+    )
+
+
+def _report_from_row(row: sqlite3.Row) -> ResearchReport:
+    return ResearchReport(
+        report_id=str(row["report_id"]),
+        event_id=str(row["event_id"]),
+        event_update=int(row["event_update"]),
+        ticker=str(row["ticker"]),
+        event_occurred_at=_datetime(row["event_occurred_at"]),
+        created_at=_datetime(row["created_at"]),
+        summary=str(row["summary"]),
+        is_fake=bool(row["is_fake"]),
+    )
+
+
+def _failure_from_row(row: sqlite3.Row) -> ProcessingFailure:
+    return ProcessingFailure(
+        failure_id=str(row["failure_id"]),
+        event_id=str(row["event_id"]),
+        event_update=int(row["event_update"]),
+        step=FailureStep(str(row["step"])),
+        retryable=bool(row["retryable"]),
+        occurred_at=_datetime(row["occurred_at"]),
+        description=str(row["description"]),
     )
 
 
