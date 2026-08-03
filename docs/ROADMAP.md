@@ -30,7 +30,9 @@ Prove fixtures → normalization → deterministic detection → correlation →
 
 **Status:** Not started
 
-Add SQLite-backed signal, evolving-event, research, notification, and failure state. One event manager accepts independent offline market and news signals and owns promotion, exact deduplication, same-severity suppression, material escalation, cooldowns, and restart-safe stage recovery. Use persisted lifecycle state as the local research queue; add no worker service or live integration.
+**Spec:** [`specs/002-durable-event-foundation/`](../specs/002-durable-event-foundation/SPEC.md)
+
+Add SQLite-backed signal, evolving-event, research, notification, and failure state. One event manager accepts independent offline market and news signals and owns promotion, exact deduplication, same-severity suppression, material escalation, delivery-state idempotency, and restart-safe stage recovery. Use persisted lifecycle state as the local research queue; add no worker service or live integration.
 
 **Complete when:** replay and restart tests prove that a new signal is processed once, an exact duplicate or same-severity repeat stays quiet, a worse severity or significant new news requeues one update, and interrupted research or notification resumes from durable state.
 
