@@ -2,14 +2,14 @@
 
 **Document status:** Approved
 
-**Execution status:** Not started
+**Execution status:** In progress
 
 ## Tasks
 
-- [ ] 1. Define the market and news signal data, including unique IDs, importance levels, source details, and tests for valid values.
-- [ ] 2. Add the database-path setting and the first SQLite database layout. Test that setup is safe to repeat and that data survives closing and reopening a temporary database.
-- [ ] 3. Save and reload signals, events, reports, notification attempts, failures, and source details. Test that database rows return as normal application models.
-- [ ] 4. Let market-only and news-only signals create events. Test how related signals are grouped and prove the same signal ID is handled only once.
+- [x] 1. Define the market and news signal data, including unique IDs, importance levels, source details, and tests for valid values.
+- [x] 2. Add the database-path setting and the first SQLite database layout. Test that setup is safe to repeat and that data survives closing and reopening a temporary database.
+- [x] 3. Save and reload signals, events, reports, notification attempts, failures, and source details. Test that database rows return as normal application models.
+- [x] 4. Let market-only and news-only signals create events. Test how related signals are grouped and prove the same signal ID is handled only once.
 - [ ] 5. Save same- or lower-importance signals quietly. Request new research for higher importance, a new market time window, or significant news. Test that several waiting updates result in work only for the newest update.
 - [ ] 6. Save each research step and fake report. Test that an older report cannot be sent after newer information arrives and that only the newest event update is researched.
 - [ ] 7. Save every notification attempt and mark an event update complete only after success. Test failed delivery, one success per update, and immediate eligibility for later important information.

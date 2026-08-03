@@ -17,9 +17,14 @@ logger = logging.getLogger(__name__)
 def create_fake_research_report(event: SignificantEvent) -> ResearchReport:
     """Create fixed, clearly labeled research output for an event."""
 
+    event_id = f"walking-skeleton:{event.symbol}:{event.occurred_at.isoformat()}"
     return ResearchReport(
-        symbol=event.symbol,
+        report_id=f"report:{event_id}:1",
+        event_id=event_id,
+        event_update=1,
+        ticker=event.symbol,
         event_occurred_at=event.occurred_at,
+        created_at=event.occurred_at,
         summary=(
             f"{FAKE_RESEARCH_PREFIX}: {event.symbol} has correlated market and news "
             f"signals matching '{event.news_signal.matched_phrase}'."

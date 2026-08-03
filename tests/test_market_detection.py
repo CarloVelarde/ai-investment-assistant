@@ -33,6 +33,15 @@ def test_detects_qualifying_market_signal() -> None:
     assert signal.feed == "offline-demo"
 
 
+def test_market_signal_id_is_repeatable() -> None:
+    first = detect_market_signal(BASE_RECORD, tracked_symbol="ACME")
+    second = detect_market_signal(BASE_RECORD, tracked_symbol="ACME")
+
+    assert first is not None
+    assert second is not None
+    assert first.signal_id == second.signal_id
+
+
 def test_market_rule_includes_exact_thresholds() -> None:
     record = replace(
         BASE_RECORD,

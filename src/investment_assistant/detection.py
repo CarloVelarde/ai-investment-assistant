@@ -1,12 +1,17 @@
 """Deterministic signal detection."""
 
 from decimal import Decimal
+from uuid import NAMESPACE_URL, uuid5
 
 from investment_assistant.models import (
     MarketRecord,
     MarketSignal,
+    MarketWindow,
     NewsRecord,
     NewsSignal,
+    SignalDirection,
+    SignalImportance,
+    SourceDetails,
 )
 
 MAXIMUM_PRICE_RATIO = Decimal("0.95")
@@ -38,13 +43,28 @@ def detect_market_signal(
         return None
 
     return MarketSignal(
-        symbol=record.symbol,
+        signal_id=_stable_signal_id(
+            "market",
+            record.provider,
+            record.feed,
+            record.symbol,
+            record.occurred_at.isoformat(),
+        ),
+        ticker=record.symbol,
         occurred_at=record.occurred_at,
+        importance=SignalImportance.HIGH,
+        source_details=SourceDetails(
+            provider=record.provider,
+            source=record.provider,
+            feed=record.feed,
+            retrieved_at=record.occurred_at,
+        ),
+        direction=SignalDirection.DOWN,
+        rule="walking_skeleton_price_volume_decline",
+        window=MarketWindow.ONE_HOUR,
         price_decline_ratio=(record.previous_close - record.latest_price)
         / record.previous_close,
         volume_ratio=volume_ratio,
-        provider=record.provider,
-        feed=record.feed,
     )
 
 
@@ -68,11 +88,26 @@ def detect_news_signal(
         return None
 
     return NewsSignal(
-        symbol=record.symbol,
+        signal_id=_stable_signal_id(
+            "news",
+            record.source,
+            record.symbol,
+            record.published_at.isoformat(),
+            record.headline,
+        ),
+        ticker=record.symbol,
         occurred_at=record.published_at,
+        importance=SignalImportance.HIGH,
+        source_details=SourceDetails(
+            provider=record.source,
+            source=record.source,
+            feed=None,
+            retrieved_at=record.published_at,
+        ),
+        category=matched_phrase.upper().replace(" ", "_"),
+        direction=SignalDirection.DOWN,
         matched_phrase=matched_phrase,
         headline=record.headline,
-        source=record.source,
     )
 
 
@@ -81,3 +116,8 @@ def _normalize_tracked_symbol(symbol: str) -> str:
     if not normalized_symbol:
         raise ValueError("tracked symbol must not be blank")
     return normalized_symbol
+
+
+def _stable_signal_id(kind: str, *parts: str) -> str:
+    identity = "|".join((kind, *parts))
+    return f"{kind}-{uuid5(NAMESPACE_URL, identity)}"

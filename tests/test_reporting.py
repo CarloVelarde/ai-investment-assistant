@@ -8,9 +8,13 @@ import pytest
 
 from investment_assistant.models import (
     MarketSignal,
+    MarketWindow,
     NewsSignal,
     ResearchReport,
+    SignalDirection,
+    SignalImportance,
     SignificantEvent,
+    SourceDetails,
 )
 from investment_assistant.reporting import (
     EVENT_NOTIFICATION_PREFIX,
@@ -22,19 +26,37 @@ from investment_assistant.reporting import (
 MARKET_TIME = datetime(2026, 1, 15, 15, 30, tzinfo=UTC)
 EVENT_TIME = datetime(2026, 1, 15, 16, 30, tzinfo=UTC)
 MARKET_SIGNAL = MarketSignal(
-    symbol="ACME",
+    signal_id="market-1",
+    ticker="ACME",
     occurred_at=MARKET_TIME,
+    importance=SignalImportance.HIGH,
+    source_details=SourceDetails(
+        provider="fixture",
+        source="fixture",
+        feed="offline-demo",
+        retrieved_at=MARKET_TIME,
+    ),
+    direction=SignalDirection.DOWN,
+    rule="price-volume-decline",
+    window=MarketWindow.ONE_HOUR,
     price_decline_ratio=Decimal("0.06"),
     volume_ratio=Decimal("1.6"),
-    provider="fixture",
-    feed="offline-demo",
 )
 NEWS_SIGNAL = NewsSignal(
-    symbol="ACME",
+    signal_id="news-1",
+    ticker="ACME",
     occurred_at=MARKET_TIME + timedelta(minutes=15),
+    importance=SignalImportance.HIGH,
+    source_details=SourceDetails(
+        provider="fixture",
+        source="Fixture Wire",
+        feed="offline-demo",
+        retrieved_at=MARKET_TIME + timedelta(minutes=15),
+    ),
+    category="GUIDANCE",
+    direction=SignalDirection.DOWN,
     matched_phrase="guidance cut",
     headline="Acme announces guidance cut",
-    source="Fixture Wire",
 )
 EVENT = SignificantEvent(
     symbol="ACME",

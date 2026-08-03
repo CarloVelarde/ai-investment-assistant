@@ -54,6 +54,17 @@ def test_detects_case_insensitive_phrase_in_summary() -> None:
     assert signal.matched_phrase == "product recall"
 
 
+def test_news_signal_id_is_repeatable() -> None:
+    record = replace(BASE_RECORD, headline="Acme announces guidance cut")
+
+    first = detect_news_signal(record, tracked_symbol="ACME")
+    second = detect_news_signal(record, tracked_symbol="ACME")
+
+    assert first is not None
+    assert second is not None
+    assert first.signal_id == second.signal_id
+
+
 def test_rejects_news_without_fixed_phrase() -> None:
     assert detect_news_signal(BASE_RECORD, tracked_symbol="ACME") is None
 

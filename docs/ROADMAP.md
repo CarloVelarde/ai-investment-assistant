@@ -4,7 +4,7 @@
 
 ## Current focus
 
-**Milestone 2 — Durable event foundation** is next. Its feature spec must be approved before implementation.
+**Milestone 2 — Durable event foundation** is in progress under its approved feature spec.
 
 ## Milestones
 
@@ -28,7 +28,7 @@ Prove fixtures → normalization → deterministic detection → correlation →
 
 ### Milestone 2 — Durable event foundation
 
-**Status:** Not started
+**Status:** In progress
 
 **Spec:** [`specs/002-durable-event-foundation/`](../specs/002-durable-event-foundation/SPEC.md)
 
