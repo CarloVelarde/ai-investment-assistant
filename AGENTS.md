@@ -2,6 +2,10 @@
 
 Keep changes small, explainable, and aligned with the active milestone.
 
+## Communication
+
+Prefer plain language a careful high-school reader can follow. Use technical terms when they add clarity, but explain ideas in everyday words first. Keep summaries, questions, tradeoffs, and status updates short and concrete. Avoid jargon-heavy prose unless the user asks for deep technical detail.
+
 ## Required context
 
 Read only:

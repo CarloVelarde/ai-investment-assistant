@@ -1,4 +1,25 @@
-"""Small SQLite persistence boundary for durable event state."""
+"""Small SQLite persistence boundary for durable event state.
+
+Write paths
+-----------
+Real application code (especially the event manager) must use the *safe
+lifecycle* methods. Those methods check version and status, and they update
+event progress in one database transaction with the related row.
+
+Safe lifecycle writers (use these in app code):
+
+- ``record_signal`` — attach a signal to an event and save both together
+- ``mark_researching`` — claim the research step for the current update
+- ``save_report_and_mark_reported`` — save the report and mark ready to notify
+- ``save_notification_result`` — save a notify attempt and final/failed status
+- ``save_failure_and_mark_failed`` — save a failure and mark the step failed
+
+Free-form writers (``save_event``, ``save_signal``, ``save_report``,
+``save_notification_attempt``, ``save_failure``) insert or replace rows
+without enforcing lifecycle rules. Prefer them only in tests (to seed a
+specific state) or inside this module. Do not use them from production
+pipeline code to advance an event through research or notification.
+"""
 
 import json
 import sqlite3

@@ -33,3 +33,12 @@
 | AC-11–AC-12 | 12 |
 
 Add tests with each behavior. Mark a task complete only after its tests pass. Record any change to product scope or stable architecture in the document that owns that decision before changing this feature.
+
+## Follow-ups (approved after M2 review)
+
+These are not part of the original M2 task list; they are agreed cleanup or later work.
+
+- [x] **Notify before send:** Before sending a notification, re-check that the event is still the current update and still ready to notify. If a newer important update has already moved the event on, do not send the old report. If the database refuses to save the notify result, reload durable truth instead of assuming success. Tests cover (1) stale report skipped when the event already moved on, and (2) important update during notification does not mark the old update notified.
+- [x] **Light handling of save yes/no at notify:** When `save_notification_result` returns false, stop and reload the event (same spirit as refused report saves). Stronger “claim delivery before send” / crash-during-live-delivery rules stay with later notification work (Milestone 7).
+- [x] **Documented:** Real app code should use only the safe lifecycle write methods on storage (see `storage.py` module docs). Free-form save helpers are for tests and careful internal use.
+- [ ] **Later milestone (market history / episode rules):** Decide how and when a market episode closes so grouping stops attaching every future same-direction signal to an old finished event. Track with Milestone 3.

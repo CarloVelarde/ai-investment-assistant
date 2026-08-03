@@ -196,6 +196,8 @@ class EventManager:
                 failure,
                 updated_at=self._clock.now(),
             )
+            # Ignore a refused failure save the same way as a refused report
+            # save: reload durable truth and stop this pass.
             return self._storage.get_event(started.event_id)
 
         saved = self._storage.save_report_and_mark_reported(
@@ -214,20 +216,22 @@ class EventManager:
         event: Event,
         notifier: DurableNotifier,
     ) -> Event | None:
-        report = self._storage.get_report_for_update(
-            event.event_id,
-            event.current_update,
-        )
-        if report is None:
-            return event
+        # Re-check the saved event before any user-facing side effect so an
+        # outdated report is not sent after a newer important update.
+        deliverable = self._deliverable_notification(event)
+        if deliverable is None:
+            return self._storage.get_event(event.event_id)
+        current, report = deliverable
 
         attempted_at = self._clock.now()
         attempt_number = (
-            len(self._storage.list_notification_attempts(event.event_id)) + 1
+            len(self._storage.list_notification_attempts(current.event_id)) + 1
         )
-        attempt_id = f"attempt:{event.event_id}:{event.current_update}:{attempt_number}"
+        attempt_id = (
+            f"attempt:{current.event_id}:{current.current_update}:{attempt_number}"
+        )
         try:
-            notifier(event, report)
+            notifier(current, report)
         except Exception as error:
             description = _safe_failure_description(
                 FailureStep.NOTIFICATION,
@@ -235,36 +239,61 @@ class EventManager:
             )
             attempt = NotificationAttempt(
                 attempt_id=attempt_id,
-                event_id=event.event_id,
-                event_update=event.current_update,
+                event_id=current.event_id,
+                event_update=current.current_update,
                 attempted_at=attempted_at,
                 succeeded=False,
                 safe_error=description,
             )
             failure = self._new_failure(
-                event,
+                current,
                 FailureStep.NOTIFICATION,
                 error,
             )
-            self._storage.save_notification_result(
+            if not self._storage.save_notification_result(
                 attempt,
                 failure=failure,
                 updated_at=self._clock.now(),
-            )
+            ):
+                # Database refused (event moved on or no longer deliverable).
+                return self._storage.get_event(current.event_id)
         else:
             attempt = NotificationAttempt(
                 attempt_id=attempt_id,
-                event_id=event.event_id,
-                event_update=event.current_update,
+                event_id=current.event_id,
+                event_update=current.current_update,
                 attempted_at=attempted_at,
                 succeeded=True,
             )
-            self._storage.save_notification_result(
+            if not self._storage.save_notification_result(
                 attempt,
                 failure=None,
                 updated_at=self._clock.now(),
-            )
-        return self._storage.get_event(event.event_id)
+            ):
+                # Database refused (event moved on or no longer deliverable).
+                return self._storage.get_event(current.event_id)
+        return self._storage.get_event(current.event_id)
+
+    def _deliverable_notification(
+        self,
+        event: Event,
+    ) -> tuple[Event, ResearchReport] | None:
+        """Return the event and report only if this update is still ready to notify."""
+
+        current = self._storage.get_event(event.event_id)
+        if current is None:
+            return None
+        if current.current_update != event.current_update:
+            return None
+        if current.status not in {EventStatus.REPORTED, EventStatus.FAILED}:
+            return None
+        report = self._storage.get_report_for_update(
+            current.event_id,
+            current.current_update,
+        )
+        if report is None or report.event_update != current.current_update:
+            return None
+        return current, report
 
     def _new_failure(
         self,

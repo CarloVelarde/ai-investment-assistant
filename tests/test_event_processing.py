@@ -228,6 +228,140 @@ def test_failed_notification_retries_without_research_and_completion_is_idempote
         assert len(storage.list_reports(completed.event_id)) == 1
 
 
+def test_stale_report_is_not_sent_when_event_already_moved_on(
+    tmp_path: Path,
+) -> None:
+    """Before notify, re-check the saved event; skip outdated reports."""
+
+    important_update = replace(
+        MARKET_SIGNAL,
+        signal_id="market-acme-down-2",
+        importance=SignalImportance.HIGH,
+    )
+    notification_updates: list[int] = []
+
+    def notify(event: Event, _: ResearchReport) -> None:
+        notification_updates.append(event.current_update)
+
+    with SQLiteStorage(tmp_path / "stale-before-notify.sqlite3") as storage:
+        storage.initialize()
+        manager = EventManager(storage, clock=FixedClock(PROCESS_TIME))
+        initial = manager.handle_signal(MARKET_SIGNAL)
+        assert initial.event is not None
+
+        researching = storage.mark_researching(
+            initial.event.event_id,
+            1,
+            updated_at=PROCESS_TIME,
+        )
+        assert researching is not None
+        report = create_fake_research_report(
+            researching,
+            storage.list_signals(researching.event_id),
+        )
+        assert storage.save_report_and_mark_reported(
+            report,
+            updated_at=PROCESS_TIME,
+        )
+        stale_reported = storage.get_event(initial.event.event_id)
+        assert stale_reported is not None
+        assert stale_reported.status is EventStatus.REPORTED
+        assert stale_reported.current_update == 1
+
+        moved_on = manager.handle_signal(important_update)
+        assert moved_on.event is not None
+        assert moved_on.event.current_update == 2
+        assert moved_on.event.status is EventStatus.QUEUED
+
+        skipped = manager._notify(stale_reported, notify)
+
+        assert notification_updates == []
+        assert skipped is not None
+        assert skipped.current_update == 2
+        assert skipped.status is EventStatus.QUEUED
+        assert storage.list_notification_attempts(skipped.event_id) == ()
+
+        completed = manager.process_event(
+            skipped.event_id,
+            researcher=create_fake_research_report,
+            notifier=notify,
+        )
+        assert completed is not None
+        assert completed.status is EventStatus.NOTIFIED
+        assert notification_updates == [2]
+        attempts = storage.list_notification_attempts(completed.event_id)
+        assert len(attempts) == 1
+        assert attempts[0].succeeded is True
+        assert attempts[0].event_update == 2
+
+
+def test_important_update_during_notification_does_not_complete_old_update(
+    tmp_path: Path,
+) -> None:
+    """If a newer update arrives mid-delivery, do not mark the old update notified."""
+
+    important_update = replace(
+        MARKET_SIGNAL,
+        signal_id="market-acme-down-2",
+        importance=SignalImportance.HIGH,
+    )
+    research_updates: list[int] = []
+    notification_updates: list[int] = []
+
+    with SQLiteStorage(tmp_path / "update-during-notify.sqlite3") as storage:
+        storage.initialize()
+        manager = EventManager(storage, clock=FixedClock(PROCESS_TIME))
+        initial = manager.handle_signal(MARKET_SIGNAL)
+        assert initial.event is not None
+
+        def research(
+            event: Event,
+            signals: tuple[Signal, ...],
+        ) -> ResearchReport:
+            research_updates.append(event.current_update)
+            return create_fake_research_report(event, signals)
+
+        def notify_and_requeue(event: Event, _: ResearchReport) -> None:
+            notification_updates.append(event.current_update)
+            if event.current_update == 1:
+                manager.handle_signal(important_update)
+
+        first = manager.process_event(
+            initial.event.event_id,
+            researcher=research,
+            notifier=notify_and_requeue,
+        )
+
+        assert first is not None
+        assert first.current_update == 2
+        assert first.status is EventStatus.QUEUED
+        assert research_updates == [1]
+        # The old notify callback may still run once; durable state must not
+        # record a successful delivery for the superseded update.
+        assert notification_updates == [1]
+        attempts = storage.list_notification_attempts(first.event_id)
+        assert attempts == ()
+        assert [
+            report.event_update for report in storage.list_reports(first.event_id)
+        ] == [1]
+
+        completed = manager.process_event(
+            first.event_id,
+            researcher=research,
+            notifier=notify_and_requeue,
+        )
+
+        assert completed is not None
+        assert completed.status is EventStatus.NOTIFIED
+        assert completed.current_update == 2
+        assert research_updates == [1, 2]
+        assert notification_updates == [1, 2]
+        attempts = storage.list_notification_attempts(completed.event_id)
+        assert len(attempts) == 1
+        assert attempts[0].succeeded is True
+        assert attempts[0].event_update == 2
+
+
 def test_later_important_update_is_immediately_eligible_after_notification(
     tmp_path: Path,
 ) -> None:

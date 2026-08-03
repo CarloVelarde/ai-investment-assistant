@@ -136,3 +136,5 @@ Decide these in the feature that first needs them:
 - Async worker and queue arrangement.
 - Model selection, prompts, and report wording.
 - Optional libraries, deployment, interfaces, and provider failover.
+- Market episode open/close rules so grouping does not forever reopen a finished same-direction event (Milestone 3 owns trend end; must define what “closed” means for matching).
+- Strong live-delivery claim/recovery (for example mark delivery in progress before an external send, and reconcile “sent but not recorded”) when Discord and production notification land (Milestone 7). Milestone 2 only re-checks current update before notify and honors a refused notify save.
