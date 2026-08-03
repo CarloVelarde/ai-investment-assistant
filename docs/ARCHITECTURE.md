@@ -6,13 +6,18 @@ The MVP is one local, single-process Python application. It may use `asyncio` fo
 
 ```mermaid
 flowchart TD
-    A["Market and news inputs"] --> B["Normalize"]
-    B --> C["Detect and classify"]
-    C --> D["Correlate event"]
-    D -->|Significant| E["Assemble evidence"]
-    E --> F["Bounded research"]
-    F --> G["Validate and persist"]
-    G --> H["Notify once"]
+    A["Market inputs"] --> B["Normalize and retain history"]
+    B --> C["Fast detector"]
+    B --> D["Daily trend detector"]
+    N["News inputs"] --> O["Filter and classify"]
+    C --> E["Normalized signals"]
+    D --> E
+    O --> E
+    E --> F["Event manager"]
+    F -->|Research eligible| G["Assemble evidence"]
+    G --> H["Bounded research"]
+    H --> I["Validate and persist"]
+    I --> J["Notify when warranted"]
 ```
 
 Product behavior is defined in [`PRODUCT.md`](PRODUCT.md), durable choices in [`DECISIONS.md`](DECISIONS.md), and implementation details in feature specs.
@@ -20,6 +25,8 @@ Product behavior is defined in [`PRODUCT.md`](PRODUCT.md), durable choices in [`
 ## Principles
 
 - Deterministic code handles measurable rules, filtering, cooldowns, and deduplication.
+- Market and significant news signals may qualify independently.
+- Detectors emit signals; one event manager owns promotion and research eligibility.
 - News classification is cheaper and separate from focused research.
 - Provider objects are normalized before entering core logic.
 - Research receives application-assembled evidence and narrow read-only tools.
@@ -34,11 +41,19 @@ Adapters retrieve market and news data and convert provider responses into valid
 
 ### Detection
 
-Detection consumes normalized records and produces signals. Market rules use explicit price, relative-market, volume, and optional volatility inputs. News passes deterministic filters before a small structured classifier. Failures remain visible without crashing the pipeline.
+Detection consumes normalized records and only produces signals; it does not enqueue research.
+
+- The fast market detector evaluates completed bars for abrupt movement and emits only on a qualifying threshold crossing.
+- The after-close daily market detector uses the same history to evaluate five- and twenty-trading-day movement, recent-high drawdown, and performance relative to `SPY`.
+- News passes deterministic filters before a small structured classifier and may emit a significant news signal without a market signal.
+
+There is no separate weekly pipeline. Exact thresholds, severity boundaries, and rearm rules remain feature-level decisions. Detection failures remain visible without crashing the application.
 
 ### Events
 
-The event boundary owns correlation, significance, deduplication, cooldowns, lifecycle state, retry eligibility, and the decision to research materially new evidence. Market and news may arrive in either order; only one active event should represent the same ticker and topic.
+The event manager consumes all qualifying signals and alone owns correlation, promotion, deduplication, cooldowns, lifecycle state, retry eligibility, and research eligibility. A market or significant news signal may create an event by itself; later related signals enrich it.
+
+Sustained directional movement is one evolving episode. Same-severity repeats are retained without repeated work. A worse severity, a newly crossed horizon, or significant new news may update and requeue the episode. Rejected inputs create no event or cooldown; notification cooldown begins only after successful delivery.
 
 ### Research
 
@@ -49,6 +64,7 @@ Research receives a prepared evidence packet only after an event qualifies. The 
 SQLite stores the state needed for recovery, history, replay, and idempotency:
 
 - Configuration and watchlist data.
+- Normalized market history and detector baselines.
 - Signals, articles, and classifications.
 - Event lifecycle and retry state.
 - Reports, source metadata, and provenance.
@@ -67,10 +83,11 @@ Exact fields and type names belong to feature specs, but these concepts are stab
 | Concept | Responsibility |
 | --- | --- |
 | Market record | Normalized price, volume, provider, feed, time, and completeness data |
-| Market signal | Detected condition, baseline, score, and provenance |
+| Market signal | Rule, horizon, direction, baseline, observed movement, severity, time, and provenance |
 | News article | Normalized identity, content metadata, symbols, source, and timestamps |
 | News classification | Relevance, category, direction, significance, confidence, and model metadata |
-| Event | Correlated signals, stable identity, significance, lifecycle, and deduplication state |
+| News signal | A significant classified article eligible to create or enrich an event |
+| Event | Independent or correlated signals, episode identity, severity, lifecycle, and deduplication state |
 | Research input | Evidence packet and focused questions |
 | Research report | Findings, evidence, competing explanations, uncertainty, confidence, and posture |
 
@@ -90,7 +107,7 @@ stateDiagram-v2
     Updated --> Researching
 ```
 
-Lifecycle state survives restarts. Routine updates do not reopen a reported event; materially new evidence may.
+Lifecycle state survives restarts. Routine same-severity updates do not reopen a reported event; escalation, a new horizon, or significant news may.
 
 ## Reliability and security
 
@@ -107,4 +124,4 @@ Lifecycle state survives restarts. Routine updates do not reopen a reported even
 
 ## First slice
 
-The approved [offline walking skeleton](../specs/001-offline-walking-skeleton/SPEC.md) proves these boundaries with fixtures, fake research, and console output before any live integration or database is added.
+The completed [offline walking skeleton](../specs/001-offline-walking-skeleton/SPEC.md) proves the internal boundaries with one paired market-and-news scenario. That demonstration does not make news a gate for market events or market movement a gate for significant news. Later milestones add durable independent triggers, broader market detection, and live integrations in that order.

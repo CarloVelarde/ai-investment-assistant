@@ -4,7 +4,7 @@
 
 ## Current focus
 
-**Milestone 2 — Durable event foundation** is next. Its feature spec must be approved before implementation; Milestone 1 is complete.
+**Milestone 2 — Durable event foundation** is next. Its feature spec must be approved before implementation.
 
 ## Milestones
 
@@ -12,7 +12,7 @@
 
 **Status:** Complete
 
-Provide a runnable Python package, configuration and logging foundations, `uv` dependency management, documentation templates, and local and CI quality checks.
+Provide the runnable Python package, `uv` dependency management, configuration and logging foundations, documentation templates, and local and CI checks.
 
 **Completed:** A fresh checkout can be set up, run, and validated from the README without secrets or external services.
 
@@ -22,56 +22,69 @@ Provide a runnable Python package, configuration and logging foundations, `uv` d
 
 **Spec:** [`specs/001-offline-walking-skeleton/`](../specs/001-offline-walking-skeleton/SPEC.md)
 
-Prove the complete internal flow with local fixtures, deterministic rules, fake research, and console notification. Use one triggering and one non-triggering scenario; add no external service or database.
+Prove fixtures → normalization → deterministic detection → correlation → event → fake research → console notification without live services or persistence.
 
-**Completed:** The deterministic pipeline, triggering and non-triggering end-to-end tests, packaged fixtures, and repository checks pass.
+**Completed:** The deterministic paired-signal pipeline, packaged fixtures, end-to-end scenarios, and repository checks pass. Pairing was a demonstration, not a product gating rule.
 
 ### Milestone 2 — Durable event foundation
 
 **Status:** Not started
 
-Add SQLite persistence, event lifecycle state, deduplication, cooldowns, notification state, and restart-safe processing.
+Add SQLite-backed signal, evolving-event, research, notification, and failure state. One event manager accepts independent offline market and news signals and owns promotion, exact deduplication, same-severity suppression, material escalation, cooldowns, and restart-safe stage recovery. Use persisted lifecycle state as the local research queue; add no worker service or live integration.
 
-**Complete when:** events and delivery state survive restarts without duplicate work or alerts.
+**Complete when:** replay and restart tests prove that a new signal is processed once, an exact duplicate or same-severity repeat stays quiet, a worse severity or significant new news requeues one update, and interrupted research or notification resumes from durable state.
 
-### Milestone 3 — Live market data
-
-**Status:** Not started
-
-Add Alpaca market data, historical baselines, stream health and reconnection, stale-data detection, and missing-bar backfill.
-
-**Complete when:** a small watchlist reliably produces normalized market signals during regular market hours.
-
-### Milestone 4 — Live news and classification
+### Milestone 3 — Market history and offline detection
 
 **Status:** Not started
 
-Add Alpaca news, deterministic filtering and deduplication, classifier-call limits, and a small structured AI classifier.
+Persist normalized replay bars and implement two deterministic evaluation modes over the same history and signal contract:
 
-**Complete when:** relevant news can enrich or create events without classifying or researching every article.
+- A fast detector for abrupt movement on completed bars.
+- One fixed after-close daily scan for five- and twenty-trading-day movement, recent-high drawdown, and performance relative to `SPY`.
 
-### Milestone 5 — Research and reporting
+Define explicit thresholds, severity levels, crossing, rearm, and episode-closing rules in the feature spec. Add no separate weekly process or configurable cadence initially.
 
-**Status:** Not started
+**Complete when:** offline abrupt-drop, gradual-decline, continuation, escalation, recovery, and broad-market scenarios produce understandable signals and one correctly updated event episode without duplicate research.
 
-Add evidence packets, bounded read-only tools, focused AI research, source tracking, and validated reports.
-
-**Complete when:** a significant event produces a bounded report with citations, uncertainty, and a permitted research posture.
-
-### Milestone 6 — Discord and operations
+### Milestone 4 — Live market data
 
 **Status:** Not started
 
-Add idempotent Discord delivery, bounded retries, operational status, and API rate and cost enforcement.
+Add Alpaca market history and streaming behind the existing input boundary. Add stream health, reconnection, stale-data detection, missing-bar backfill, and invocation of the fast and daily detectors without changing their core rules.
 
-**Complete when:** one completed report produces one useful alert and failures remain visible and recoverable.
+**Complete when:** a small watchlist reliably feeds normalized live and recovered bars through both market evaluation modes during regular market operation.
 
-### Milestone 7 — Full-loop hardening
+### Milestone 5 — Live news and classification
 
 **Status:** Not started
 
-Replay representative scenarios and failures through live-operation boundaries and tune rules from observed behavior.
+Add Alpaca news, deterministic relevance and duplicate filtering, classifier-call limits, and a small structured AI classifier. Significant news may create an event alone or enrich and requeue an existing market episode; rejected news creates no event or cooldown.
+
+**Complete when:** significant news is processed once through the shared event manager without requiring a market trigger or researching every article.
+
+### Milestone 6 — Research and reporting
+
+**Status:** Not started
+
+Add evidence packets, bounded read-only tools, focused AI research, source tracking, and validated reports. Market-only research must allow an honest “cause unknown” result.
+
+**Complete when:** each eligible new or materially updated event produces one bounded report with citations, uncertainty, and a permitted research posture.
+
+### Milestone 7 — Discord and operations
+
+**Status:** Not started
+
+Add idempotent Discord delivery, bounded retries, operational status, and API rate and cost enforcement. Notification cooldown begins only after successful delivery and does not block material escalation.
+
+**Complete when:** completed reports produce the intended Discord alerts, routine repeats stay quiet, and failures remain visible and recoverable.
+
+### Milestone 8 — Full-loop hardening
+
+**Status:** Not started
+
+Replay representative market, news, restart, provider-failure, research-failure, and delivery-failure scenarios through the same boundaries used by live operation. Tune rules only from observed behavior.
 
 **Complete when:** the local MVP meets the [product success criteria](PRODUCT.md#mvp-success-criteria) with documented limitations.
 
-After the MVP, deployment, interfaces, valuation tools, or additional providers require demonstrated need and a new roadmap decision.
+After the MVP, configurable scan cadences, additional horizons, deployment, interfaces, valuation tools, or provider failover require demonstrated need and a new roadmap decision.

@@ -95,6 +95,24 @@ Permanent truth lives in `README.md`, `AGENTS.md`, and `docs/`. Each meaningful 
 
 **Why:** Humans and agents should load only relevant context.
 
+### D-018 — Route independent signals through one event manager
+
+Market and significant news signals may each qualify an event without the other. Detectors emit normalized signals but never enqueue research directly. One event manager owns correlation, promotion, deduplication, escalation, cooldowns, and research eligibility.
+
+**Why:** Independent triggers avoid missed market-only or news-only events; one promotion owner prevents duplicate and inconsistent work.
+
+### D-019 — Use fast and daily market evaluation in one pipeline
+
+One fast detector evaluates completed market bars for abrupt movement. One fixed after-close daily scan evaluates five- and twenty-trading-day movement, recent-high drawdown, and broad-market-relative performance. Both use the same normalized history, signal contract, and event manager; there is no separate weekly service or user-configurable cadence initially.
+
+**Why:** Two cadences catch abrupt and gradual movement without creating two systems or unnecessary scheduling options.
+
+### D-020 — Let material escalation bypass suppression
+
+This refines D-006: sustained movement belongs to one evolving episode, but a material update may justify a new report. Repeated evidence at the same severity is recorded without repeated research or notification; a worse severity, a newly crossed horizon, or significant new news may update and requeue the episode. Rejected inputs never start a cooldown, and notification cooldown begins only after successful delivery.
+
+**Why:** Suppression should reduce noise without hiding meaningful deterioration or later explanations.
+
 ## Rejected
 
 ### D-015 — Add a separate `RULES.md`
@@ -115,7 +133,7 @@ Decide these in the feature that first needs them:
 
 - Package and class structure.
 - Database schema, repository methods, and SQLite library.
-- Detection thresholds, correlation windows, and scoring formulas.
+- Detection thresholds, correlation windows, severity boundaries, and rearm rules.
 - Async worker and queue arrangement.
 - Model selection, prompts, and report wording.
 - Optional libraries, deployment, interfaces, and provider failover.

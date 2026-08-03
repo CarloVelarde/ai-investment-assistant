@@ -5,11 +5,13 @@ A local market-monitoring and research assistant for a long-term investor. It de
 ```text
 market and news data
   → deterministic detection
-  → event correlation
+  → unified event management
   → bounded research
   → validated report
   → notification
 ```
+
+Market and significant news signals may trigger independently; one event manager correlates related evidence and prevents duplicate work.
 
 See the [roadmap](docs/ROADMAP.md) for current status and milestone order.
 
@@ -38,7 +40,7 @@ uv run pytest
 - [Decisions](docs/DECISIONS.md) — durable choices and rejected alternatives
 - [Roadmap](docs/ROADMAP.md) — milestone order and status
 - [Agent instructions](AGENTS.md) — repository workflow and rules
-- [Offline walking skeleton](specs/001-offline-walking-skeleton/SPEC.md) — active feature specification
+- [Offline walking skeleton](specs/001-offline-walking-skeleton/SPEC.md) — completed first feature
 
 ## License
 

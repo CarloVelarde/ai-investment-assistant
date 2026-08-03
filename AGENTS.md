@@ -36,6 +36,9 @@ Documentation, tooling, and corrective changes may proceed without a feature spe
 - Add interfaces only at real external or replaceable boundaries.
 - Convert provider objects into internal models before core logic.
 - Keep deterministic detection, filtering, correlation, cooldowns, and deduplication outside AI components.
+- Let market and significant news signals qualify independently; neither gates the other.
+- Keep fast and daily market evaluation in one pipeline with one signal contract.
+- Detectors emit signals; only the event manager decides promotion and research eligibility.
 - Keep news classification separate from research.
 - Make time and external I/O controllable when behavior depends on them.
 - Preserve provenance when source, feed, retrieval time, or model version affects interpretation.

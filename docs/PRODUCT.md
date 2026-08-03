@@ -10,9 +10,11 @@ System boundaries are defined in [`ARCHITECTURE.md`](ARCHITECTURE.md); milestone
 
 ## Core loop and principles
 
-> Detect a meaningful event → correlate related signals → assemble evidence → produce one focused report → notify once.
+> Detect qualifying market or news signals → manage one event → assemble evidence → produce a focused report → notify when warranted.
 
 - Use ordinary code for measurable rules, filtering, correlation, cooldowns, and deduplication.
+- Allow market and significant news signals to qualify independently; neither is required to validate the other.
+- Let detectors emit signals while one event manager owns promotion and research eligibility.
 - Use AI only for narrow news classification and focused research after escalation.
 - Keep classification inexpensive and separate from research.
 - Distinguish evidence from inference, cite important sources, and state uncertainty.
@@ -34,28 +36,28 @@ The application has no brokerage connection.
 
 ### Market monitoring
 
-Monitor minute-level activity for the watchlist and a few comparison symbols. Detection may use:
+Maintain normalized market history for the watchlist and a few comparison symbols. Use two deterministic evaluations in one pipeline:
 
-- Price movement over configured windows.
-- Movement relative to the broad market, initially `SPY`.
-- Same-feed volume and simple recent volatility context.
+- A fast detector evaluates completed bars for abrupt movement.
+- A fixed after-close daily scan evaluates five- and twenty-trading-day movement, drawdown from a recent high, and performance relative to `SPY`.
 
-Detect stale or interrupted data and recover missing minute bars when possible.
+Both produce the same market-signal shape and use volume and volatility as understandable supporting inputs. Exact thresholds belong to their feature specs. Detect stale or interrupted data and recover missing bars when possible.
 
 ### News monitoring
 
-Filter company news by watchlist relevance, recency, source, event category, duplicates, and classifier-call limits. Qualifying articles receive a small structured classification with relevance, category, likely significance, direction, confidence, and rationale.
+Filter company news by watchlist relevance, recency, source, event category, duplicates, and classifier-call limits. Qualifying articles receive a small structured classification with relevance, category, likely significance, direction, confidence, and rationale. Significant news may create an event alone or enrich an existing market episode; rejected news creates no event or cooldown.
 
-### Event correlation
+### Event management
 
-Group related signals into one durable event rather than separate research jobs. The MVP must handle:
+One event manager routes independent market and news signals into durable events rather than letting detectors create research jobs. The MVP must handle:
 
 - Market movement with or without related news.
 - Significant news before a price reaction.
 - Broad-market or sector movement.
 - Duplicate articles and materially new evidence.
+- Abrupt movement and gradual multi-day or multi-week movement.
 
-Events retain enough lifecycle state for deduplication, cooldowns, retries, and restart-safe processing.
+Sustained movement remains one evolving episode. Repeated evidence at the same severity is recorded quietly; a worse severity, a newly crossed horizon, or significant new news may justify another research run and notification. Events retain enough lifecycle state for deduplication, cooldowns, retries, and restart-safe processing.
 
 ### Research
 
@@ -108,12 +110,12 @@ The MVP is successful when:
 
 1. A small configured watchlist can be monitored during regular market hours.
 2. Interrupted data is detected and missing minute bars can be recovered.
-3. Deterministic rules produce understandable market signals.
+3. Fast and daily deterministic rules detect understandable abrupt and gradual market movement.
 4. News is filtered and classified without researching every article.
-5. Related signals become one deduplicated event.
-6. A significant event produces one bounded research run.
+5. Independent market and news signals route through one event manager and related signals become one evolving event.
+6. Each research-eligible event or material update produces one bounded research run.
 7. The report follows its schema, cites evidence, and states uncertainty.
-8. Discord receives one useful alert without duplicate delivery.
+8. Discord receives useful alerts for new or materially escalated events without routine duplicate delivery.
 9. Event, report, failure, and notification history survive restarts.
 10. Recorded scenarios replay through the live core flow.
 11. External services can change without rewriting core logic.
