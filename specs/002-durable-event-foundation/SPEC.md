@@ -76,18 +76,18 @@ The report must be saved before notification begins. Notification is complete on
 
 ## Acceptance criteria
 
-- [ ] AC-01: The SQLite database can be set up more than once safely and preserves signals, events, reports, notification attempts, failures, and source details.
-- [ ] AC-02: A market signal by itself and a significant news signal by itself can each create one event waiting for research.
-- [ ] AC-03: Repeating the same signal does nothing, while a different signal at the same or lower importance is saved without starting more research.
-- [ ] AC-04: A higher importance level, a newly reached market time window, or new significant news makes the existing event ready for research again.
-- [ ] AC-05: Related signals stay in one event, and several pending updates produce research and notification only for the latest complete update.
-- [ ] AC-06: Successful notification marks that update complete; failed notification does not; later important information remains eligible immediately.
-- [ ] AC-07: A report is saved before notification, and repeating a completed update does not repeat research or notification.
-- [ ] AC-08: Restart tests prove that interrupted research, a saved report awaiting notification, and retryable failures continue from the correct step.
-- [ ] AC-09: Running the same offline console scenario twice against the same database produces no duplicate research or event notification.
-- [ ] AC-10: Tests control time, use temporary databases and test replacements for future services, and need no network, secrets, or external services.
-- [ ] AC-11: This milestone adds no market calculations, live integrations, background worker, or unnecessary database framework.
-- [ ] AC-12: Ruff formatting and linting, mypy, and pytest pass.
+- [x] AC-01: The SQLite database can be set up more than once safely and preserves signals, events, reports, notification attempts, failures, and source details.
+- [x] AC-02: A market signal by itself and a significant news signal by itself can each create one event waiting for research.
+- [x] AC-03: Repeating the same signal does nothing, while a different signal at the same or lower importance is saved without starting more research.
+- [x] AC-04: A higher importance level, a newly reached market time window, or new significant news makes the existing event ready for research again.
+- [x] AC-05: Related signals stay in one event, and several pending updates produce research and notification only for the latest complete update.
+- [x] AC-06: Successful notification marks that update complete; failed notification does not; later important information remains eligible immediately.
+- [x] AC-07: A report is saved before notification, and repeating a completed update does not repeat research or notification.
+- [x] AC-08: Restart tests prove that interrupted research, a saved report awaiting notification, and retryable failures continue from the correct step.
+- [x] AC-09: Running the same offline console scenario twice against the same database produces no duplicate research or event notification.
+- [x] AC-10: Tests control time, use temporary databases and test replacements for future services, and need no network, secrets, or external services.
+- [x] AC-11: This milestone adds no market calculations, live integrations, background worker, or unnecessary database framework.
+- [x] AC-12: Ruff formatting and linting, mypy, and pytest pass.
 
 ## Constraints
 

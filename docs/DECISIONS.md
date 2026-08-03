@@ -50,7 +50,7 @@ The application assembles evidence and exposes narrow read-only tools. Research 
 
 ### D-008 — Use SQLite for MVP durability
 
-SQLite stores event, report, failure, notification, and provenance state behind one controlled write boundary.
+SQLite, accessed through Python's built-in `sqlite3` module, stores event, report, failure, notification, and provenance state behind one controlled write boundary. Schema and repository method details remain feature-level decisions.
 
 **Why:** It provides enough local durability without a database service.
 
@@ -132,7 +132,6 @@ Do not add microservices, Redis, Celery, Kafka, Kubernetes, or a complex multi-a
 Decide these in the feature that first needs them:
 
 - Package and class structure.
-- Database schema, repository methods, and SQLite library.
 - Detection thresholds, correlation windows, severity boundaries, and rearm rules.
 - Async worker and queue arrangement.
 - Model selection, prompts, and report wording.

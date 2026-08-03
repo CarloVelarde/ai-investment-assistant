@@ -36,6 +36,7 @@ def main() -> None:
     )
     with as_file(fixture_resource) as fixture_directory:
         run_pipeline(
+            database_path=settings.database_path,
             tracked_symbol=TRACKED_SYMBOL,
             market_fixture_path=fixture_directory / "triggering_market.json",
             news_fixture_path=fixture_directory / "triggering_news.json",

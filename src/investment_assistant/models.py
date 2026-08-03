@@ -241,16 +241,6 @@ class Event:
 
 
 @dataclass(frozen=True, slots=True)
-class SignificantEvent:
-    """One correlated market and news event from the walking skeleton."""
-
-    symbol: str
-    occurred_at: datetime
-    market_signal: MarketSignal
-    news_signal: NewsSignal
-
-
-@dataclass(frozen=True, slots=True)
 class ResearchReport:
     """Structured research output for one specific event update."""
 

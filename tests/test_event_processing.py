@@ -20,7 +20,7 @@ from investment_assistant.models import (
     SignalImportance,
     SourceDetails,
 )
-from investment_assistant.reporting import create_fake_durable_research_report
+from investment_assistant.reporting import create_fake_research_report
 from investment_assistant.storage import SQLiteStorage
 
 SIGNAL_TIME = datetime(2026, 2, 3, 15, 30, tzinfo=UTC)
@@ -89,7 +89,7 @@ def test_only_latest_waiting_update_is_researched_and_report_precedes_delivery(
             saved_event = storage.get_event(event.event_id)
             assert saved_event is not None
             assert saved_event.status is EventStatus.RESEARCHING
-            return create_fake_durable_research_report(event, signals)
+            return create_fake_research_report(event, signals)
 
         def notify(event: Event, report: ResearchReport) -> None:
             notification_calls.append(event.current_update)
@@ -142,7 +142,7 @@ def test_report_for_outdated_update_is_discarded_and_never_notified(
         ) -> ResearchReport:
             research_updates.append(event.current_update)
             manager.handle_signal(important_update)
-            return create_fake_durable_research_report(event, signals)
+            return create_fake_research_report(event, signals)
 
         def notify(event: Event, _: ResearchReport) -> None:
             notification_updates.append(event.current_update)
@@ -163,7 +163,7 @@ def test_report_for_outdated_update_is_discarded_and_never_notified(
 
         completed = manager.process_event(
             result.event_id,
-            researcher=create_fake_durable_research_report,
+            researcher=create_fake_research_report,
             notifier=notify,
         )
 
@@ -184,7 +184,7 @@ def test_failed_notification_retries_without_research_and_completion_is_idempote
         signals: tuple[Signal, ...],
     ) -> ResearchReport:
         research_calls.append(event.current_update)
-        return create_fake_durable_research_report(event, signals)
+        return create_fake_research_report(event, signals)
 
     def notify(event: Event, _: ResearchReport) -> None:
         nonlocal should_fail
@@ -239,7 +239,7 @@ def test_later_important_update_is_immediately_eligible_after_notification(
         signals: tuple[Signal, ...],
     ) -> ResearchReport:
         research_calls.append(event.current_update)
-        return create_fake_durable_research_report(event, signals)
+        return create_fake_research_report(event, signals)
 
     def notify(event: Event, _: ResearchReport) -> None:
         notification_calls.append(event.current_update)

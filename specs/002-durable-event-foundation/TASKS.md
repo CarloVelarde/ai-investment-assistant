@@ -2,7 +2,7 @@
 
 **Document status:** Approved
 
-**Execution status:** In progress
+**Execution status:** Complete
 
 ## Tasks
 
@@ -14,10 +14,10 @@
 - [x] 6. Save each research step and fake report. Test that an older report cannot be sent after newer information arrives and that only the newest event update is researched.
 - [x] 7. Save every notification attempt and mark an event update complete only after success. Test failed delivery, one success per update, and immediate eligibility for later important information.
 - [x] 8. Save failures and recover after restart. Test waiting research, interrupted research, saved reports awaiting notification, and retryable failures without repeating finished steps.
-- [ ] 9. Replace the Milestone 1 rule that required paired market and news signals with the shared saved-event flow. Keep the fake research and console notification.
-- [ ] 10. Add full-flow offline tests for a first run, exact repeat, same-importance repeat, higher importance, news added to an event, and restart recovery. Use a controllable clock.
-- [ ] 11. Connect the console command to an ignored local SQLite file and bundled offline scenario. Verify that a second run with the same database produces no duplicate report or event notification.
-- [ ] 12. Update active documentation if implementation details change, confirm that no later-milestone dependency or service was added, and run all repository checks.
+- [x] 9. Replace the Milestone 1 rule that required paired market and news signals with the shared saved-event flow. Keep the fake research and console notification.
+- [x] 10. Add full-flow offline tests for a first run, exact repeat, same-importance repeat, higher importance, news added to an event, and restart recovery. Use a controllable clock.
+- [x] 11. Connect the console command to an ignored local SQLite file and bundled offline scenario. Verify that a second run with the same database produces no duplicate report or event notification.
+- [x] 12. Update active documentation if implementation details change, confirm that no later-milestone dependency or service was added, and run all repository checks.
 
 ## Acceptance coverage
 

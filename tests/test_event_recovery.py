@@ -19,7 +19,7 @@ from investment_assistant.models import (
     SignalImportance,
     SourceDetails,
 )
-from investment_assistant.reporting import create_fake_durable_research_report
+from investment_assistant.reporting import create_fake_research_report
 from investment_assistant.storage import SQLiteStorage
 
 SIGNAL_TIME = datetime(2026, 2, 4, 15, 30, tzinfo=UTC)
@@ -106,7 +106,7 @@ def test_saved_report_resumes_at_notification_without_research(
             updated_at=PROCESS_TIME,
         )
         assert researching is not None
-        report = create_fake_durable_research_report(
+        report = create_fake_research_report(
             researching,
             storage.list_signals(event_id),
         )
@@ -244,7 +244,7 @@ def _recording_researcher(
         signals: tuple[Signal, ...],
     ) -> ResearchReport:
         calls.append(event.current_update)
-        return create_fake_durable_research_report(event, signals)
+        return create_fake_research_report(event, signals)
 
     return research
 

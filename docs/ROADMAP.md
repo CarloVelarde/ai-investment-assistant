@@ -4,7 +4,7 @@
 
 ## Current focus
 
-**Milestone 2 — Durable event foundation** is in progress under its approved feature spec.
+**Milestone 3 — Market history and offline detection** is next. Its feature spec must be approved before implementation.
 
 ## Milestones
 
@@ -28,13 +28,13 @@ Prove fixtures → normalization → deterministic detection → correlation →
 
 ### Milestone 2 — Durable event foundation
 
-**Status:** In progress
+**Status:** Complete
 
 **Spec:** [`specs/002-durable-event-foundation/`](../specs/002-durable-event-foundation/SPEC.md)
 
 Add SQLite-backed signal, evolving-event, research, notification, and failure state. One event manager accepts independent offline market and news signals and owns promotion, exact deduplication, same-severity suppression, material escalation, delivery-state idempotency, and restart-safe stage recovery. Use persisted lifecycle state as the local research queue; add no worker service or live integration.
 
-**Complete when:** replay and restart tests prove that a new signal is processed once, an exact duplicate or same-severity repeat stays quiet, a worse severity or significant new news requeues one update, and interrupted research or notification resumes from durable state.
+**Completed:** SQLite-backed lifecycle state now routes independent market and news signals through one event manager. Replay, escalation, notification, failure, and restart tests prove durable idempotent processing without a worker or live service.
 
 ### Milestone 3 — Market history and offline detection
 

@@ -97,17 +97,20 @@ Retain provider, feed, source, retrieval time, and model or prompt version where
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Collecting
-    Collecting --> Rejected: Below threshold
-    Collecting --> Queued: Significant
+    [*] --> Queued: Significant signal
     Queued --> Researching
-    Researching --> Reported: Success
-    Researching --> Failed: Error or limit
-    Reported --> Updated: Material evidence
-    Updated --> Researching
+    Researching --> Reported: Report persisted
+    Researching --> Failed: Research error
+    Reported --> Notified: Delivery persisted
+    Reported --> Failed: Delivery error
+    Failed --> Researching: Retry research
+    Failed --> Notified: Retry saved-report delivery
+    Researching --> Queued: Newer material update
+    Reported --> Queued: Newer material update
+    Notified --> Queued: Newer material update
 ```
 
-Lifecycle state survives restarts. Routine same-severity updates do not reopen a reported event; escalation, a new horizon, or significant news may.
+Lifecycle state survives restarts. Interrupted research resumes research, while a saved report or retryable delivery failure resumes notification without repeating research. Routine same-severity updates do not reopen completed work; escalation, a new horizon, or significant news requeues the event immediately.
 
 ## Reliability and security
 
