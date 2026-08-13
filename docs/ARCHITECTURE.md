@@ -153,5 +153,6 @@ Lifecycle state survives restarts. Interrupted research resumes research, while 
 - [Offline walking skeleton](../specs/001-offline-walking-skeleton/SPEC.md) proved fixtures → detection → event → fake research → console notify without live services.
 - [Durable event foundation](../specs/002-durable-event-foundation/SPEC.md) added SQLite lifecycle state and independent market/news promotion through one event manager.
 - [Market history and offline detection](../specs/003-market-history-and-offline-detection/SPEC.md) added persisted bars, fast/daily deterministic market rules, detector rearm state, and open/closed market episodes.
+- [Live market data](../specs/004-live-market-data/SPEC.md) will feed those same bars from Alpaca history and one stock stream during regular hours.
 
 That path does not make news a gate for market events or market movement a gate for significant news. Later milestones add live market data, news classification that can accept significant good or bad news, real research, and Discord in roadmap order. Offline news detection today is a negative-phrase demo only.

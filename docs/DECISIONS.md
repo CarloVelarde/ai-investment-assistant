@@ -155,6 +155,19 @@ This refines D-005 and D-018:
 
 **Why:** Cost control belongs on the news firehose, not by ignoring positive stories. A second AI judge in front of every event would blur responsibilities and still miss market-only cases.
 
+### D-024 — Live market data uses one Alpaca adapter, IEX by default
+
+Milestone 4 connects live prices without changing Milestone 3 detectors:
+
+- Alpaca REST supplies history; one stock websocket supplies completed minute bars and late minute revisions. SDK types stop at the adapter.
+- Default feed is IEX so a free Basic account works. SIP is optional config when the account allows it.
+- Streaming `dailyBars` are not completed days. Daily evaluation uses REST `1Day` bars after the regular close.
+- Fast evaluation uses regular-session minutes only (09:30–16:00 ET).
+- Startup backfill quiet-replays older bars into detector state and emits only from today’s regular open onward.
+- Live news stays Milestone 5. The same keys will be reused; this milestone does not open the news socket.
+
+**Why:** The live source should be replaceable and safe on the free plan. Detectors stay local and testable.
+
 ## Rejected
 
 ### D-015 — Add a separate `RULES.md`
@@ -183,3 +196,4 @@ Decide these in the feature that first needs them:
 Resolved in feature specs / accepted decisions above when applicable:
 
 - Detection thresholds, severity, rearm, and market episode open/close → D-021 and Milestone 3 spec.
+- Live market source, IEX default, after-close daily REST, quiet backfill → D-024 and Milestone 4 spec.

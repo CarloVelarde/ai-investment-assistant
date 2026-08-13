@@ -4,7 +4,7 @@
 
 ## Current focus
 
-**Milestone 4 — Live market data** is next. Milestone 3 offline market history and detection is complete.
+**Milestone 4 — Live market data** is active. The feature spec is approved; implementation may proceed from the task list.
 
 ## Milestones
 
@@ -53,7 +53,9 @@ Explicit thresholds, severity levels, crossing, rearm, and episode-closing rules
 
 ### Milestone 4 — Live market data
 
-**Status:** Not started
+**Status:** Spec approved — implementation not started
+
+**Spec:** [`specs/004-live-market-data/`](../specs/004-live-market-data/SPEC.md)
 
 Add Alpaca market history and streaming behind the existing input boundary. Add stream health, reconnection, stale-data detection, missing-bar backfill, and invocation of the fast and daily detectors without changing their core rules.
 
