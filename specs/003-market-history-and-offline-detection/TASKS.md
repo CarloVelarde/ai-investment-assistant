@@ -2,7 +2,7 @@
 
 **Document status:** Approved
 
-**Execution status:** In progress
+**Execution status:** Complete
 
 ## Tasks
 
@@ -16,8 +16,8 @@
 - [x] 8. Restrict market event grouping to open episodes; close an episode when all detector keys for that ticker+direction are clear after daily evaluation. Test close does not research and a later drop creates a new event.
 - [x] 9. Add offline bar fixtures for abrupt drop, gradual decline, continuation, escalation, recovery, and broad-market/`SPY` scenarios.
 - [x] 10. Wire offline pipeline: ingest bars in time order → detect → handle_signal → episode maintenance → process_pending. Replace console reliance on the Milestone 1 toy market rule with history-based detection for this path.
-- [ ] 11. Add end-to-end scenario tests proving AC-06–AC-10 (events, single latest research on escalation, recovery close, new event after close, relative-to-`SPY` behavior) with controllable clock and temporary DB.
-- [ ] 12. Confirm no live services, workers, ORM, or configurable cadence were introduced; update permanent docs only if implementation forces a durable decision change; run all repository checks.
+- [x] 11. Add end-to-end scenario tests proving AC-06–AC-10 (events, single latest research on escalation, recovery close, new event after close, relative-to-`SPY` behavior) with controllable clock and temporary DB.
+- [x] 12. Confirm no live services, workers, ORM, or configurable cadence were introduced; update permanent docs only if implementation forces a durable decision change; run all repository checks.
 
 ## Acceptance coverage
 

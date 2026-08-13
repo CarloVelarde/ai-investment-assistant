@@ -4,7 +4,7 @@
 
 ## Current focus
 
-**Milestone 3 — Market history and offline detection** is active. The feature spec is approved; implementation may proceed from the task list.
+**Milestone 4 — Live market data** is next. Milestone 3 offline market history and detection is complete.
 
 ## Milestones
 
@@ -38,7 +38,7 @@ Add SQLite-backed signal, evolving-event, research, notification, and failure st
 
 ### Milestone 3 — Market history and offline detection
 
-**Status:** Implementation in progress
+**Status:** Complete
 
 **Spec:** [`specs/003-market-history-and-offline-detection/`](../specs/003-market-history-and-offline-detection/SPEC.md)
 
@@ -49,7 +49,7 @@ Persist normalized replay bars and implement two deterministic evaluation modes 
 
 Explicit thresholds, severity levels, crossing, rearm, and episode-closing rules live in the feature spec. Add no separate weekly process or configurable cadence initially.
 
-**Complete when:** offline abrupt-drop, gradual-decline, continuation, escalation, recovery, and broad-market scenarios produce understandable signals and one correctly updated event episode without duplicate research.
+**Completed:** Offline abrupt-drop, gradual-decline, continuation, escalation, recovery, and broad-market scenarios produce understandable signals and one correctly updated event episode without duplicate research. Recovery closes the episode; a later drop starts a new event.
 
 ### Milestone 4 — Live market data
 

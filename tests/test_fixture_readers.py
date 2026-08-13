@@ -135,6 +135,8 @@ def test_rejects_invalid_news_fixture(
         ("escalation", MarketTimeframe.ONE_MINUTE, 71),
         ("recovery", MarketTimeframe.ONE_DAY, 12),
         ("broad_market", MarketTimeframe.ONE_DAY, 12),
+        ("fresh_drop", MarketTimeframe.ONE_DAY, 6),
+        ("market_wide", MarketTimeframe.ONE_DAY, 12),
     ],
 )
 def test_loads_market_history_scenario(
@@ -154,8 +156,9 @@ def test_loads_market_history_scenario(
     assert "TSLA" in {bar.ticker for bar in bars}
 
 
-def test_broad_market_fixture_includes_spy_context() -> None:
-    _, _, bars = load_market_history_fixture(HISTORY_DIR / "broad_market.json")
+@pytest.mark.parametrize("name", ["broad_market", "market_wide"])
+def test_relative_spy_fixtures_include_spy_context(name: str) -> None:
+    _, _, bars = load_market_history_fixture(HISTORY_DIR / f"{name}.json")
 
     assert {bar.ticker for bar in bars} == {"TSLA", "SPY"}
 

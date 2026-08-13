@@ -202,19 +202,19 @@ The Milestone 1 single-record price/volume toy rule may be removed or reduced to
 
 ## Acceptance criteria
 
-- [ ] AC-01: Normalized market bars for a watchlist ticker and `SPY` can be saved and reloaded; repeating the same bar identity does not create duplicates.
-- [ ] AC-02: The fast detector emits on an abrupt one-hour threshold crossing with the correct importance, and stays quiet for below-threshold and same-severity continuation until rearm.
-- [ ] AC-03: The daily detector emits for five-day move, twenty-day move, drawdown-from-high, and relative-to-`SPY` rules using the stated thresholds and windows.
-- [ ] AC-04: Importance escalation on the same rule/window (for example `MODERATE` then `HIGH`) emits a second signal; same-importance continuation does not.
-- [ ] AC-05: Detector baseline/rearm state survives database reopen and prevents duplicate fires on replay of the same bars.
-- [ ] AC-06: Abrupt-drop and gradual-decline offline scenarios each create open events and research-eligible work through the event manager without requiring news.
-- [ ] AC-07: Escalation (worse severity or new window) requeues a single latest update without duplicate research for outdated intermediate updates.
-- [ ] AC-08: Recovery clears detector stress, closes the open market episode, and does not start new research solely because of recovery/close.
-- [ ] AC-09: After close, a later new qualifying drop creates a **new** event rather than attaching to the closed episode.
-- [ ] AC-10: Broad-market scenario shows relative-to-`SPY` behavior correctly (company-specific underperformance vs market-wide move) with understandable signals.
-- [ ] AC-11: Offline end-to-end path uses controllable time, temporary SQLite, fake research, and console notification; no network, secrets, or live providers.
-- [ ] AC-12: This milestone adds no live integrations, Discord, workers, ORM, weekly process, or user-configurable cadence.
-- [ ] AC-13: Ruff formatting and linting, mypy, and pytest pass.
+- [x] AC-01: Normalized market bars for a watchlist ticker and `SPY` can be saved and reloaded; repeating the same bar identity does not create duplicates.
+- [x] AC-02: The fast detector emits on an abrupt one-hour threshold crossing with the correct importance, and stays quiet for below-threshold and same-severity continuation until rearm.
+- [x] AC-03: The daily detector emits for five-day move, twenty-day move, drawdown-from-high, and relative-to-`SPY` rules using the stated thresholds and windows.
+- [x] AC-04: Importance escalation on the same rule/window (for example `MODERATE` then `HIGH`) emits a second signal; same-importance continuation does not.
+- [x] AC-05: Detector baseline/rearm state survives database reopen and prevents duplicate fires on replay of the same bars.
+- [x] AC-06: Abrupt-drop and gradual-decline offline scenarios each create open events and research-eligible work through the event manager without requiring news.
+- [x] AC-07: Escalation (worse severity or new window) requeues a single latest update without duplicate research for outdated intermediate updates.
+- [x] AC-08: Recovery clears detector stress, closes the open market episode, and does not start new research solely because of recovery/close.
+- [x] AC-09: After close, a later new qualifying drop creates a **new** event rather than attaching to the closed episode.
+- [x] AC-10: Broad-market scenario shows relative-to-`SPY` behavior correctly (company-specific underperformance vs market-wide move) with understandable signals.
+- [x] AC-11: Offline end-to-end path uses controllable time, temporary SQLite, fake research, and console notification; no network, secrets, or live providers.
+- [x] AC-12: This milestone adds no live integrations, Discord, workers, ORM, weekly process, or user-configurable cadence.
+- [x] AC-13: Ruff formatting and linting, mypy, and pytest pass.
 
 ## Constraints
 

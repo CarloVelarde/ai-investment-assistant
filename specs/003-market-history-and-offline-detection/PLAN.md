@@ -77,6 +77,8 @@ Add packaged fixtures under `fixtures/market_history/` with explicit bar JSON pe
 - recovery (stress then rearm/close);
 - broad market (ticker + `SPY` daily bars for relative rule).
 
+`fresh_drop` and `market_wide` are extra packaged series used to prove a new event after close and market-wide vs company-specific relative-to-`SPY` behavior.
+
 Pipeline flow:
 
 ```text
