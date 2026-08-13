@@ -30,6 +30,7 @@ from investment_assistant.market_metrics import (
 )
 from investment_assistant.models import (
     DetectorState,
+    Event,
     MarketBar,
     MarketSignal,
     MarketTimeframe,
@@ -358,6 +359,40 @@ def detect_daily_from_storage(
     result = detect_daily_signals(ticker_bars, spy_bars, previous, now=now)
     _store_states(storage, result.states)
     return result
+
+
+def market_direction_is_clear(
+    storage: SQLiteStorage,
+    ticker: str,
+    direction: SignalDirection,
+) -> bool:
+    """Return whether every stored key for this direction is armed/clear."""
+
+    states = storage.list_detector_states(ticker, direction)
+    return all(state.last_emitted_importance is None for state in states)
+
+
+def maintain_market_episodes(
+    storage: SQLiteStorage,
+    ticker: str,
+    *,
+    now: datetime,
+) -> tuple[Event, ...]:
+    """Close open market episodes whose directional detector keys are clear."""
+
+    closed: list[Event] = []
+    for direction in SignalDirection:
+        if not market_direction_is_clear(storage, ticker, direction):
+            continue
+        for event in storage.find_direction_events(
+            ticker,
+            direction,
+            with_market_signal=True,
+        ):
+            updated = storage.close_episode(event.event_id, closed_at=now)
+            if updated is not None:
+                closed.append(updated)
+    return tuple(closed)
 
 
 def _collect_signed_rule(

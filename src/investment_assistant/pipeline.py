@@ -1,6 +1,7 @@
 """Synchronous durable offline application flow."""
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from investment_assistant.clock import Clock
@@ -8,12 +9,20 @@ from investment_assistant.detection import detect_market_signal, detect_news_sig
 from investment_assistant.event_manager import EventManager
 from investment_assistant.fixture_readers import (
     load_market_fixture,
+    load_market_history_fixture,
     load_news_fixture,
+)
+from investment_assistant.market_detection import (
+    detect_daily_from_storage,
+    detect_fast_from_storage,
+    maintain_market_episodes,
 )
 from investment_assistant.models import (
     Event,
+    MarketBar,
     MarketRecord,
     MarketSignal,
+    MarketTimeframe,
     NewsRecord,
     NewsSignal,
     NotificationAttempt,
@@ -40,6 +49,22 @@ class OfflineRunResult:
     reports: tuple[ResearchReport, ...]
     notification_attempts: tuple[NotificationAttempt, ...]
     failures: tuple[ProcessingFailure, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class MarketHistoryRunResult:
+    """Observable state after one bar-history offline run."""
+
+    scenario: str
+    watchlist: tuple[str, ...]
+    accepted_signal_ids: tuple[str, ...]
+    events: tuple[Event, ...]
+    processed_events: tuple[Event, ...]
+    reports: tuple[ResearchReport, ...]
+    notification_attempts: tuple[NotificationAttempt, ...]
+    failures: tuple[ProcessingFailure, ...]
+    diagnostics: tuple[str, ...]
+    closed_event_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +125,87 @@ def run_offline_signals(
         )
 
 
+def run_market_history(
+    *,
+    database_path: Path,
+    fixture_path: Path,
+    clock: Clock,
+    researcher: Researcher = create_fake_research_report,
+    notifier: Notifier = emit_console_notification,
+) -> MarketHistoryRunResult:
+    """Ingest fixture bars, detect, group, close recovered episodes, then process."""
+
+    scenario, watchlist, bars = load_market_history_fixture(fixture_path)
+    watched = frozenset(watchlist)
+    diagnostics: list[str] = []
+    closed_event_ids: list[str] = []
+    accepted_signal_ids: list[str] = []
+
+    with SQLiteStorage(database_path) as storage:
+        storage.initialize()
+        manager = EventManager(storage, clock=clock)
+        for bar in _bars_in_evaluation_order(bars):
+            storage.save_market_bar(bar)
+            _sync_clock(clock, bar.end_at)
+            if not bar.is_complete or bar.ticker not in watched:
+                continue
+            if bar.timeframe is MarketTimeframe.ONE_MINUTE:
+                result = detect_fast_from_storage(
+                    storage,
+                    bar.ticker,
+                    now=clock.now(),
+                )
+            elif bar.timeframe is MarketTimeframe.ONE_DAY:
+                result = detect_daily_from_storage(
+                    storage,
+                    bar.ticker,
+                    now=clock.now(),
+                )
+            else:
+                continue
+            diagnostics.extend(result.diagnostics)
+            for signal in result.signals:
+                if manager.handle_signal(signal).accepted:
+                    accepted_signal_ids.append(signal.signal_id)
+            if bar.timeframe is MarketTimeframe.ONE_DAY:
+                closed = maintain_market_episodes(
+                    storage,
+                    bar.ticker,
+                    now=clock.now(),
+                )
+                closed_event_ids.extend(event.event_id for event in closed)
+
+        processed_events = manager.process_pending(
+            researcher=researcher,
+            notifier=notifier,
+        )
+        events = storage.list_events()
+        return MarketHistoryRunResult(
+            scenario=scenario,
+            watchlist=watchlist,
+            accepted_signal_ids=tuple(accepted_signal_ids),
+            events=events,
+            processed_events=processed_events,
+            reports=tuple(
+                report
+                for event in events
+                for report in storage.list_reports(event.event_id)
+            ),
+            notification_attempts=tuple(
+                attempt
+                for event in events
+                for attempt in storage.list_notification_attempts(event.event_id)
+            ),
+            failures=tuple(
+                failure
+                for event in events
+                for failure in storage.list_failures(event.event_id)
+            ),
+            diagnostics=tuple(diagnostics),
+            closed_event_ids=tuple(closed_event_ids),
+        )
+
+
 def run_pipeline(
     *,
     database_path: Path,
@@ -150,3 +256,24 @@ def run_pipeline(
         news_signal=news_signal,
         durable=durable,
     )
+
+
+def _bars_in_evaluation_order(bars: tuple[MarketBar, ...]) -> tuple[MarketBar, ...]:
+    return tuple(
+        sorted(
+            bars,
+            key=lambda bar: (
+                bar.end_at,
+                bar.start_at,
+                0 if bar.ticker == "SPY" else 1,
+                bar.ticker,
+                bar.bar_id,
+            ),
+        )
+    )
+
+
+def _sync_clock(clock: Clock, when: datetime) -> None:
+    advance_to = getattr(clock, "advance_to", None)
+    if callable(advance_to):
+        advance_to(when)

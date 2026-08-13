@@ -29,3 +29,24 @@ class FixedClock:
         """Return the fixed UTC time."""
 
         return self.current_time
+
+
+class SteppingClock:
+    """A mutable clock tests and offline replay can advance explicitly."""
+
+    def __init__(self, current_time: datetime) -> None:
+        if current_time.utcoffset() is None:
+            raise ValueError("stepping time must be timezone-aware")
+        self._current_time = current_time.astimezone(UTC)
+
+    def now(self) -> datetime:
+        """Return the current injected UTC time."""
+
+        return self._current_time
+
+    def advance_to(self, when: datetime) -> None:
+        """Move the clock to an explicit timezone-aware time."""
+
+        if when.utcoffset() is None:
+            raise ValueError("stepping time must be timezone-aware")
+        self._current_time = when.astimezone(UTC)

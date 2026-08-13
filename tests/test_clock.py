@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from investment_assistant.clock import Clock, FixedClock
+from investment_assistant.clock import Clock, FixedClock, SteppingClock
 
 
 def test_fixed_clock_returns_injected_time_without_advancing() -> None:
@@ -26,3 +26,15 @@ def test_fixed_clock_normalizes_time_to_utc() -> None:
 def test_fixed_clock_rejects_naive_time() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         FixedClock(datetime(2026, 1, 15, 16, 0))
+
+
+def test_stepping_clock_advances_to_an_explicit_time() -> None:
+    clock = SteppingClock(datetime(2026, 2, 2, 14, 30, tzinfo=UTC))
+    clock.advance_to(datetime(2026, 2, 2, 15, 31, tzinfo=UTC))
+
+    assert clock.now() == datetime(2026, 2, 2, 15, 31, tzinfo=UTC)
+
+
+def test_stepping_clock_rejects_naive_time() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        SteppingClock(datetime(2026, 2, 2, 14, 30))

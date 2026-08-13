@@ -10,8 +10,10 @@ from pydantic import ValidationError
 
 from investment_assistant.fixture_readers import (
     load_market_fixture,
+    load_market_history_fixture,
     load_news_fixture,
 )
+from investment_assistant.models import MarketTimeframe
 
 FIXTURE_DIR = (
     Path(__file__).parents[1]
@@ -19,6 +21,13 @@ FIXTURE_DIR = (
     / "investment_assistant"
     / "fixtures"
     / "offline_walking_skeleton"
+)
+HISTORY_DIR = (
+    Path(__file__).parents[1]
+    / "src"
+    / "investment_assistant"
+    / "fixtures"
+    / "market_history"
 )
 
 
@@ -115,3 +124,47 @@ def test_rejects_invalid_news_fixture(
 
     with pytest.raises(ValidationError):
         load_news_fixture(path)
+
+
+@pytest.mark.parametrize(
+    ("name", "timeframe", "bar_count"),
+    [
+        ("abrupt_drop", MarketTimeframe.ONE_MINUTE, 61),
+        ("gradual_decline", MarketTimeframe.ONE_DAY, 6),
+        ("continuation", MarketTimeframe.ONE_MINUTE, 81),
+        ("escalation", MarketTimeframe.ONE_MINUTE, 71),
+        ("recovery", MarketTimeframe.ONE_DAY, 12),
+        ("broad_market", MarketTimeframe.ONE_DAY, 12),
+    ],
+)
+def test_loads_market_history_scenario(
+    name: str,
+    timeframe: MarketTimeframe,
+    bar_count: int,
+) -> None:
+    scenario, watchlist, bars = load_market_history_fixture(
+        HISTORY_DIR / f"{name}.json"
+    )
+
+    assert scenario == name
+    assert watchlist == ("TSLA",)
+    assert len(bars) == bar_count
+    assert all(bar.timeframe is timeframe for bar in bars)
+    assert all(bar.is_complete for bar in bars)
+    assert "TSLA" in {bar.ticker for bar in bars}
+
+
+def test_broad_market_fixture_includes_spy_context() -> None:
+    _, _, bars = load_market_history_fixture(HISTORY_DIR / "broad_market.json")
+
+    assert {bar.ticker for bar in bars} == {"TSLA", "SPY"}
+
+
+def test_rejects_incomplete_market_history_fixture(tmp_path: Path) -> None:
+    path = tmp_path / "bad-history.json"
+    path.write_text(
+        json.dumps({"scenario": "bad", "watchlist": ["TSLA"]}), encoding="utf-8"
+    )
+
+    with pytest.raises(ValidationError):
+        load_market_history_fixture(path)

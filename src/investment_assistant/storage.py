@@ -312,10 +312,27 @@ class SQLiteStorage:
             )
         rows = self._connection.execute(
             "SELECT * FROM events WHERE ticker = ? AND direction = ?"
+            " AND episode_open = 1"
             f"{condition} ORDER BY created_at, event_id",
             (ticker, direction.value),
         ).fetchall()
         return tuple(_event_from_row(row) for row in rows)
+
+    def close_episode(self, event_id: str, *, closed_at: datetime) -> Event | None:
+        """Mark an open episode closed without changing research status."""
+
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                UPDATE events
+                SET episode_open = 0, closed_at = ?, updated_at = ?
+                WHERE event_id = ? AND episode_open = 1
+                """,
+                (_timestamp(closed_at), _timestamp(closed_at), event_id),
+            )
+            if cursor.rowcount != 1:
+                return None
+        return self.get_event(event_id)
 
     def find_category_events(self, ticker: str, category: str) -> tuple[Event, ...]:
         """Find category candidates used when news has no clear market match."""
@@ -674,6 +691,33 @@ class SQLiteStorage:
             (ticker.strip().upper(), rule, window.value, direction.value),
         ).fetchone()
         return None if row is None else _detector_state_from_row(row)
+
+    def list_detector_states(
+        self,
+        ticker: str,
+        direction: SignalDirection | None = None,
+    ) -> tuple[DetectorState, ...]:
+        """Reload detector keys for a ticker, optionally one direction."""
+
+        if direction is None:
+            rows = self._connection.execute(
+                """
+                SELECT * FROM detector_state
+                WHERE ticker = ?
+                ORDER BY rule, window, direction
+                """,
+                (ticker.strip().upper(),),
+            ).fetchall()
+        else:
+            rows = self._connection.execute(
+                """
+                SELECT * FROM detector_state
+                WHERE ticker = ? AND direction = ?
+                ORDER BY rule, window
+                """,
+                (ticker.strip().upper(), direction.value),
+            ).fetchall()
+        return tuple(_detector_state_from_row(row) for row in rows)
 
     def _write_event(self, event: Event) -> None:
         self._connection.execute(

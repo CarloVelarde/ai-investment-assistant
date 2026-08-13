@@ -68,7 +68,7 @@ Do not invent a second event manager. Close is a storage update + domain rule in
 
 ### Offline fixtures and pipeline
 
-Add packaged fixtures under something like `fixtures/market_history/` with explicit bar JSON per scenario:
+Add packaged fixtures under `fixtures/market_history/` with explicit bar JSON per scenario:
 
 - abrupt drop (minute bars);
 - gradual decline (daily bars);
