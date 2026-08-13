@@ -625,6 +625,32 @@ class SQLiteStorage:
         ).fetchone()
         return None if row is None else _market_bar_from_row(row)
 
+    def list_market_bars(
+        self,
+        ticker: str | None = None,
+        timeframe: MarketTimeframe | None = None,
+        *,
+        complete_only: bool = False,
+    ) -> tuple[MarketBar, ...]:
+        """Reload bars in start time order, optionally filtered."""
+
+        conditions: list[str] = []
+        params: list[object] = []
+        if ticker is not None:
+            conditions.append("ticker = ?")
+            params.append(ticker.strip().upper())
+        if timeframe is not None:
+            conditions.append("timeframe = ?")
+            params.append(timeframe.value)
+        if complete_only:
+            conditions.append("is_complete = 1")
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        rows = self._connection.execute(
+            f"SELECT * FROM market_bars{where} ORDER BY start_at, bar_id",
+            params,
+        ).fetchall()
+        return tuple(_market_bar_from_row(row) for row in rows)
+
     def save_detector_state(self, state: DetectorState) -> None:
         """Insert or replace detector baseline state for one key."""
 
@@ -645,7 +671,7 @@ class SQLiteStorage:
             SELECT * FROM detector_state
             WHERE ticker = ? AND rule = ? AND window = ? AND direction = ?
             """,
-            (ticker, rule, window.value, direction.value),
+            (ticker.strip().upper(), rule, window.value, direction.value),
         ).fetchone()
         return None if row is None else _detector_state_from_row(row)
 

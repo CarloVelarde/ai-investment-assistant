@@ -297,3 +297,31 @@ def test_version_1_database_migrates_and_keeps_events(tmp_path: Path) -> None:
             )
             == DETECTOR_STATE
         )
+
+
+def test_duplicate_bar_ingest_does_not_multiply_rows(tmp_path: Path) -> None:
+    updated = replace(
+        WATCHLIST_BAR,
+        close=Decimal("248.00"),
+        low=Decimal("247.50"),
+        retrieved_at=OCCURRED_AT + timedelta(seconds=30),
+    )
+
+    with SQLiteStorage(tmp_path / "bars.sqlite3") as storage:
+        storage.initialize()
+        storage.save_market_bar(WATCHLIST_BAR)
+        storage.save_market_bar(WATCHLIST_BAR)
+        storage.save_market_bar(updated)
+        storage.save_market_bar(SPY_BAR)
+
+        loaded = storage.list_market_bars()
+        tsla_minutes = storage.list_market_bars(
+            "tsla",
+            MarketTimeframe.ONE_MINUTE,
+            complete_only=True,
+        )
+
+    assert len(loaded) == 2
+    assert {bar.bar_id for bar in loaded} == {WATCHLIST_BAR.bar_id, SPY_BAR.bar_id}
+    assert tsla_minutes == (updated,)
+    assert updated.bar_id == WATCHLIST_BAR.bar_id

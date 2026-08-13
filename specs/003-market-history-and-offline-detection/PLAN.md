@@ -36,7 +36,7 @@ Milestone 1’s `MarketRecord` single-snapshot helper may remain for old tests u
 
 ### Thresholds and pure metrics
 
-Put threshold tables and metric functions in a small dedicated module (for example `market_metrics.py` or `detection/thresholds.py`) with no I/O:
+Put threshold tables and metric functions in `market_metrics.py` with no I/O. Fast and daily detectors live in `market_detection.py` and emit Milestone 2 `MarketSignal` values only:
 
 - one-hour move, N-day return, drawdown from high, relative to `SPY`;
 - importance from magnitude;

@@ -175,7 +175,11 @@ class NewsRecord:
 
 @dataclass(frozen=True, slots=True)
 class MarketSignal:
-    """A normalized qualifying market signal."""
+    """A normalized qualifying market signal.
+
+    ``price_decline_ratio`` is the non-negative magnitude of the move in
+    ``direction`` (a 5% drop and a 5% rise both store ``0.05``).
+    """
 
     signal_id: str
     ticker: str

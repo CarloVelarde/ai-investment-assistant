@@ -43,7 +43,7 @@ def detect_market_signal(
         return None
 
     return MarketSignal(
-        signal_id=_stable_signal_id(
+        signal_id=stable_signal_id(
             "market",
             record.provider,
             record.feed,
@@ -88,7 +88,7 @@ def detect_news_signal(
         return None
 
     return NewsSignal(
-        signal_id=_stable_signal_id(
+        signal_id=stable_signal_id(
             "news",
             record.source,
             record.symbol,
@@ -118,6 +118,8 @@ def _normalize_tracked_symbol(symbol: str) -> str:
     return normalized_symbol
 
 
-def _stable_signal_id(kind: str, *parts: str) -> str:
+def stable_signal_id(kind: str, *parts: str) -> str:
+    """Return a repeatable signal ID for the same kind and identity parts."""
+
     identity = "|".join((kind, *parts))
     return f"{kind}-{uuid5(NAMESPACE_URL, identity)}"
