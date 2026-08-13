@@ -2,12 +2,12 @@
 
 **Document status:** Approved
 
-**Execution status:** Not started
+**Execution status:** In progress
 
 ## Tasks
 
-- [ ] 1. Add `MarketBar` (and timeframe enum) with validation tests for required fields, UTC times, and complete-bar expectations.
-- [ ] 2. Extend SQLite schema/version for market bars, detector state, and `episode_open` / `closed_at` on events. Prove setup is safe to repeat and data survives close/reopen.
+- [x] 1. Add `MarketBar` (and timeframe enum) with validation tests for required fields, UTC times, and complete-bar expectations.
+- [x] 2. Extend SQLite schema/version for market bars, detector state, and `episode_open` / `closed_at` on events. Prove setup is safe to repeat and data survives close/reopen.
 - [ ] 3. Implement idempotent bar save/load by stable bar identity; test duplicate ingest does not multiply rows.
 - [ ] 4. Implement pure metric helpers and threshold tables (fast one-hour move, multi-day returns, drawdown, relative-to-`SPY`, volume dampening, rearm line). Cover boundaries with unit tests.
 - [ ] 5. Implement detector state load/save and the cross / escalate / quiet / rearm state machine with unit tests (no event manager yet).

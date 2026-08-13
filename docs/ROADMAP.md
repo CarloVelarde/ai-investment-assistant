@@ -38,7 +38,7 @@ Add SQLite-backed signal, evolving-event, research, notification, and failure st
 
 ### Milestone 3 — Market history and offline detection
 
-**Status:** Spec approved — implementation not started
+**Status:** Implementation in progress
 
 **Spec:** [`specs/003-market-history-and-offline-detection/`](../specs/003-market-history-and-offline-detection/SPEC.md)
 

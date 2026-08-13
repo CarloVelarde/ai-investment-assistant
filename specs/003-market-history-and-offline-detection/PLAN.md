@@ -24,6 +24,8 @@ New or extended groups:
 
 Use a stable bar id: `bar:{ticker}:{timeframe}:{start_at_isoformat}`.
 
+Schema version is **2**. `initialize()` creates v2 on an empty database and upgrades a Milestone 2 v1 database in place (adds `episode_open` / `closed_at`, then `market_bars` and `detector_state`). Timeframe values are `1Min` and `1Day`.
+
 ### Models
 
 Introduce a frozen `MarketBar` (and small enums for timeframe) in `models.py`. Keep detectors dependent on bars + history views, not on fixture JSON.

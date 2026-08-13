@@ -1,4 +1,4 @@
-"""Small SQLite persistence boundary for durable event state.
+"""Small SQLite persistence boundary for durable event and market state.
 
 Write paths
 -----------
@@ -15,10 +15,11 @@ Safe lifecycle writers (use these in app code):
 - ``save_failure_and_mark_failed`` — save a failure and mark the step failed
 
 Free-form writers (``save_event``, ``save_signal``, ``save_report``,
-``save_notification_attempt``, ``save_failure``) insert or replace rows
-without enforcing lifecycle rules. Prefer them only in tests (to seed a
-specific state) or inside this module. Do not use them from production
-pipeline code to advance an event through research or notification.
+``save_notification_attempt``, ``save_failure``, ``save_market_bar``,
+``save_detector_state``) insert or replace rows without enforcing
+lifecycle rules. Prefer them only in tests (to seed a specific state)
+or inside this module. Do not use them from production pipeline code to
+advance an event through research or notification.
 """
 
 import json
@@ -29,10 +30,13 @@ from pathlib import Path
 from types import TracebackType
 
 from investment_assistant.models import (
+    DetectorState,
     Event,
     EventStatus,
     FailureStep,
+    MarketBar,
     MarketSignal,
+    MarketTimeframe,
     MarketWindow,
     NewsSignal,
     NotificationAttempt,
@@ -44,9 +48,42 @@ from investment_assistant.models import (
     SourceDetails,
 )
 
-DATABASE_VERSION = 1
+DATABASE_VERSION = 2
 
-_SCHEMA = """
+_MARKET_HISTORY_TABLES = """
+CREATE TABLE IF NOT EXISTS market_bars (
+    bar_id TEXT PRIMARY KEY,
+    ticker TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    start_at TEXT NOT NULL,
+    end_at TEXT NOT NULL,
+    open_price TEXT NOT NULL,
+    high_price TEXT NOT NULL,
+    low_price TEXT NOT NULL,
+    close_price TEXT NOT NULL,
+    volume TEXT NOT NULL,
+    is_complete INTEGER NOT NULL CHECK (is_complete IN (0, 1)),
+    provider TEXT NOT NULL,
+    feed TEXT NOT NULL,
+    retrieved_at TEXT NOT NULL,
+    UNIQUE (ticker, timeframe, start_at)
+);
+
+CREATE INDEX IF NOT EXISTS market_bars_ticker_timeframe_start_idx
+    ON market_bars(ticker, timeframe, start_at);
+
+CREATE TABLE IF NOT EXISTS detector_state (
+    ticker TEXT NOT NULL,
+    rule TEXT NOT NULL,
+    window TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    last_emitted_importance TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (ticker, rule, window, direction)
+);
+"""
+
+_CORE_TABLES = """
 CREATE TABLE IF NOT EXISTS events (
     event_id TEXT PRIMARY KEY,
     ticker TEXT NOT NULL,
@@ -59,6 +96,8 @@ CREATE TABLE IF NOT EXISTS events (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     last_notified_at TEXT,
+    episode_open INTEGER NOT NULL DEFAULT 1 CHECK (episode_open IN (0, 1)),
+    closed_at TEXT,
     CHECK (direction IS NOT NULL OR category IS NOT NULL)
 );
 
@@ -124,9 +163,23 @@ CREATE TABLE IF NOT EXISTS failures (
     occurred_at TEXT NOT NULL,
     description TEXT NOT NULL
 );
-
-PRAGMA user_version = 1;
 """
+
+_SCHEMA = (
+    _CORE_TABLES
+    + _MARKET_HISTORY_TABLES
+    + f"\nPRAGMA user_version = {DATABASE_VERSION};\n"
+)
+
+_MIGRATE_V1_TO_V2 = (
+    """
+ALTER TABLE events ADD COLUMN episode_open INTEGER NOT NULL DEFAULT 1
+    CHECK (episode_open IN (0, 1));
+ALTER TABLE events ADD COLUMN closed_at TEXT;
+"""
+    + _MARKET_HISTORY_TABLES
+    + f"\nPRAGMA user_version = {DATABASE_VERSION};\n"
+)
 
 
 class SQLiteStorage:
@@ -149,16 +202,16 @@ class SQLiteStorage:
         self.close()
 
     def initialize(self) -> None:
-        """Create the first layout safely or validate its known version."""
+        """Create or upgrade the layout, or validate the current version."""
 
-        row = self._connection.execute("PRAGMA user_version").fetchone()
-        if row is None:
-            raise RuntimeError("could not read SQLite database version")
-        version = int(row[0])
-        if version not in (0, DATABASE_VERSION):
+        version = self.database_version
+        if version not in (0, 1, DATABASE_VERSION):
             raise ValueError(f"unsupported SQLite database version: {version}")
         with self._connection:
-            self._connection.executescript(_SCHEMA)
+            if version == 1:
+                self._connection.executescript(_MIGRATE_V1_TO_V2)
+            else:
+                self._connection.executescript(_SCHEMA)
 
     def close(self) -> None:
         """Close the owned database connection."""
@@ -557,14 +610,53 @@ class SQLiteStorage:
         ).fetchone()
         return None if row is None else _failure_from_row(row)
 
+    def save_market_bar(self, bar: MarketBar) -> None:
+        """Insert or replace one market bar by its stable identity."""
+
+        with self._connection:
+            self._write_market_bar(bar)
+
+    def get_market_bar(self, bar_id: str) -> MarketBar | None:
+        """Reload one market bar by stable identity."""
+
+        row = self._connection.execute(
+            "SELECT * FROM market_bars WHERE bar_id = ?",
+            (bar_id,),
+        ).fetchone()
+        return None if row is None else _market_bar_from_row(row)
+
+    def save_detector_state(self, state: DetectorState) -> None:
+        """Insert or replace detector baseline state for one key."""
+
+        with self._connection:
+            self._write_detector_state(state)
+
+    def get_detector_state(
+        self,
+        ticker: str,
+        rule: str,
+        window: MarketWindow,
+        direction: SignalDirection,
+    ) -> DetectorState | None:
+        """Reload detector state for one ticker, rule, window, and direction."""
+
+        row = self._connection.execute(
+            """
+            SELECT * FROM detector_state
+            WHERE ticker = ? AND rule = ? AND window = ? AND direction = ?
+            """,
+            (ticker, rule, window.value, direction.value),
+        ).fetchone()
+        return None if row is None else _detector_state_from_row(row)
+
     def _write_event(self, event: Event) -> None:
         self._connection.execute(
             """
             INSERT INTO events (
                 event_id, ticker, direction, category, importance,
                 market_windows, current_update, status, created_at,
-                updated_at, last_notified_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                updated_at, last_notified_at, episode_open, closed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(event_id) DO UPDATE SET
                 ticker = excluded.ticker,
                 direction = excluded.direction,
@@ -574,7 +666,9 @@ class SQLiteStorage:
                 current_update = excluded.current_update,
                 status = excluded.status,
                 updated_at = excluded.updated_at,
-                last_notified_at = excluded.last_notified_at
+                last_notified_at = excluded.last_notified_at,
+                episode_open = excluded.episode_open,
+                closed_at = excluded.closed_at
             """,
             (
                 event.event_id,
@@ -592,6 +686,8 @@ class SQLiteStorage:
                     if event.last_notified_at is None
                     else _timestamp(event.last_notified_at)
                 ),
+                int(event.episode_open),
+                None if event.closed_at is None else _timestamp(event.closed_at),
             ),
         )
 
@@ -688,6 +784,69 @@ class SQLiteStorage:
             ),
         )
 
+    def _write_market_bar(self, bar: MarketBar) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO market_bars (
+                bar_id, ticker, timeframe, start_at, end_at, open_price,
+                high_price, low_price, close_price, volume, is_complete,
+                provider, feed, retrieved_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(bar_id) DO UPDATE SET
+                end_at = excluded.end_at,
+                open_price = excluded.open_price,
+                high_price = excluded.high_price,
+                low_price = excluded.low_price,
+                close_price = excluded.close_price,
+                volume = excluded.volume,
+                is_complete = excluded.is_complete,
+                provider = excluded.provider,
+                feed = excluded.feed,
+                retrieved_at = excluded.retrieved_at
+            """,
+            (
+                bar.bar_id,
+                bar.ticker,
+                bar.timeframe.value,
+                _timestamp(bar.start_at),
+                _timestamp(bar.end_at),
+                str(bar.open),
+                str(bar.high),
+                str(bar.low),
+                str(bar.close),
+                str(bar.volume),
+                int(bar.is_complete),
+                bar.provider,
+                bar.feed,
+                _timestamp(bar.retrieved_at),
+            ),
+        )
+
+    def _write_detector_state(self, state: DetectorState) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO detector_state (
+                ticker, rule, window, direction, last_emitted_importance,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ticker, rule, window, direction) DO UPDATE SET
+                last_emitted_importance = excluded.last_emitted_importance,
+                updated_at = excluded.updated_at
+            """,
+            (
+                state.ticker,
+                state.rule,
+                state.window.value,
+                state.direction.value,
+                (
+                    None
+                    if state.last_emitted_importance is None
+                    else state.last_emitted_importance.value
+                ),
+                _timestamp(state.updated_at),
+            ),
+        )
+
     def _write_failure(self, failure: ProcessingFailure) -> None:
         self._connection.execute(
             """
@@ -723,6 +882,8 @@ def _event_from_row(row: sqlite3.Row) -> Event:
         created_at=_datetime(row["created_at"]),
         updated_at=_datetime(row["updated_at"]),
         last_notified_at=_optional_datetime(row["last_notified_at"]),
+        episode_open=bool(row["episode_open"]),
+        closed_at=_optional_datetime(row["closed_at"]),
     )
 
 
@@ -736,6 +897,38 @@ def _report_from_row(row: sqlite3.Row) -> ResearchReport:
         created_at=_datetime(row["created_at"]),
         summary=str(row["summary"]),
         is_fake=bool(row["is_fake"]),
+    )
+
+
+def _market_bar_from_row(row: sqlite3.Row) -> MarketBar:
+    return MarketBar(
+        ticker=str(row["ticker"]),
+        timeframe=MarketTimeframe(str(row["timeframe"])),
+        start_at=_datetime(row["start_at"]),
+        end_at=_datetime(row["end_at"]),
+        open=Decimal(str(row["open_price"])),
+        high=Decimal(str(row["high_price"])),
+        low=Decimal(str(row["low_price"])),
+        close=Decimal(str(row["close_price"])),
+        volume=Decimal(str(row["volume"])),
+        is_complete=bool(row["is_complete"]),
+        provider=str(row["provider"]),
+        feed=str(row["feed"]),
+        retrieved_at=_datetime(row["retrieved_at"]),
+    )
+
+
+def _detector_state_from_row(row: sqlite3.Row) -> DetectorState:
+    importance = _optional_text(row["last_emitted_importance"])
+    return DetectorState(
+        ticker=str(row["ticker"]),
+        rule=str(row["rule"]),
+        window=MarketWindow(str(row["window"])),
+        direction=SignalDirection(str(row["direction"])),
+        last_emitted_importance=(
+            None if importance is None else SignalImportance(importance)
+        ),
+        updated_at=_datetime(row["updated_at"]),
     )
 
 

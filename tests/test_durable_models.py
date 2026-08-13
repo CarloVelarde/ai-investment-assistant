@@ -8,6 +8,9 @@ from decimal import Decimal
 import pytest
 
 from investment_assistant.models import (
+    DetectorState,
+    Event,
+    EventStatus,
     MarketSignal,
     MarketWindow,
     NewsSignal,
@@ -113,3 +116,69 @@ def test_source_details_reject_blank_values(
 ) -> None:
     with pytest.raises(ValueError, match="must not be blank"):
         build_source()
+
+
+def test_new_event_defaults_to_an_open_episode() -> None:
+    event = Event(
+        event_id="event-1",
+        ticker="ACME",
+        direction=SignalDirection.DOWN,
+        category=None,
+        importance=SignalImportance.HIGH,
+        market_windows=(MarketWindow.ONE_HOUR,),
+        current_update=1,
+        status=EventStatus.QUEUED,
+        created_at=OCCURRED_AT,
+        updated_at=OCCURRED_AT,
+    )
+
+    assert event.episode_open is True
+    assert event.closed_at is None
+
+
+def test_closed_episode_requires_closed_at() -> None:
+    with pytest.raises(ValueError, match="closed episode requires closed_at"):
+        Event(
+            event_id="event-1",
+            ticker="ACME",
+            direction=SignalDirection.DOWN,
+            category=None,
+            importance=SignalImportance.HIGH,
+            market_windows=(MarketWindow.ONE_HOUR,),
+            current_update=1,
+            status=EventStatus.QUEUED,
+            created_at=OCCURRED_AT,
+            updated_at=OCCURRED_AT,
+            episode_open=False,
+        )
+
+
+def test_open_episode_rejects_closed_at() -> None:
+    with pytest.raises(ValueError, match="open episode must not have closed_at"):
+        Event(
+            event_id="event-1",
+            ticker="ACME",
+            direction=SignalDirection.DOWN,
+            category=None,
+            importance=SignalImportance.HIGH,
+            market_windows=(MarketWindow.ONE_HOUR,),
+            current_update=1,
+            status=EventStatus.QUEUED,
+            created_at=OCCURRED_AT,
+            updated_at=OCCURRED_AT,
+            closed_at=OCCURRED_AT,
+        )
+
+
+def test_detector_state_normalizes_ticker_and_allows_clear_level() -> None:
+    state = DetectorState(
+        ticker=" tsla ",
+        rule="abrupt_move",
+        window=MarketWindow.ONE_HOUR,
+        direction=SignalDirection.DOWN,
+        last_emitted_importance=None,
+        updated_at=OCCURRED_AT,
+    )
+
+    assert state.ticker == "TSLA"
+    assert state.last_emitted_importance is None

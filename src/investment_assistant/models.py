@@ -42,6 +42,13 @@ class MarketWindow(StrEnum):
     TWENTY_DAYS = "TWENTY_DAYS"
 
 
+class MarketTimeframe(StrEnum):
+    """Completed-bar period stored in market history."""
+
+    ONE_MINUTE = "1Min"
+    ONE_DAY = "1Day"
+
+
 class EventStatus(StrEnum):
     """Persisted processing state for the current event update."""
 
@@ -92,6 +99,67 @@ class MarketRecord:
     occurred_at: datetime
     provider: str
     feed: str
+
+
+@dataclass(frozen=True, slots=True)
+class MarketBar:
+    """One OHLCV period for a ticker.
+
+    Detectors evaluate only bars with ``is_complete=True``. Incomplete bars
+    may be stored, but they must still have valid times and OHLCV values.
+    """
+
+    ticker: str
+    timeframe: MarketTimeframe
+    start_at: datetime
+    end_at: datetime
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: Decimal
+    is_complete: bool
+    provider: str
+    feed: str
+    retrieved_at: datetime
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "ticker", _ticker(self.ticker))
+        object.__setattr__(self, "start_at", _as_utc(self.start_at, "start_at"))
+        object.__setattr__(self, "end_at", _as_utc(self.end_at, "end_at"))
+        if self.end_at <= self.start_at:
+            raise ValueError("end_at must be after start_at")
+        _validate_ohlcv(self.open, self.high, self.low, self.close, self.volume)
+        object.__setattr__(self, "provider", _non_blank(self.provider, "provider"))
+        object.__setattr__(self, "feed", _non_blank(self.feed, "feed"))
+        object.__setattr__(
+            self,
+            "retrieved_at",
+            _as_utc(self.retrieved_at, "retrieved_at"),
+        )
+
+    @property
+    def bar_id(self) -> str:
+        """Return the stable identity used for idempotent bar storage."""
+
+        return f"bar:{self.ticker}:{self.timeframe}:{self.start_at.isoformat()}"
+
+
+@dataclass(frozen=True, slots=True)
+class DetectorState:
+    """Last emitted importance for one detector key, or clear/armed."""
+
+    ticker: str
+    rule: str
+    window: MarketWindow
+    direction: SignalDirection
+    last_emitted_importance: SignalImportance | None
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "ticker", _ticker(self.ticker))
+        object.__setattr__(self, "rule", _non_blank(self.rule, "rule"))
+        object.__setattr__(self, "updated_at", _as_utc(self.updated_at, "updated_at"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +282,8 @@ class Event:
     created_at: datetime
     updated_at: datetime
     last_notified_at: datetime | None = None
+    episode_open: bool = True
+    closed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "event_id", _non_blank(self.event_id, "event_id"))
@@ -238,6 +308,12 @@ class Event:
                 "last_notified_at",
                 _as_utc(self.last_notified_at, "last_notified_at"),
             )
+        if self.closed_at is not None:
+            object.__setattr__(self, "closed_at", _as_utc(self.closed_at, "closed_at"))
+        if self.episode_open and self.closed_at is not None:
+            raise ValueError("open episode must not have closed_at")
+        if not self.episode_open and self.closed_at is None:
+            raise ValueError("closed episode requires closed_at")
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,6 +410,31 @@ class ProcessingFailure:
             "description",
             _non_blank(self.description, "description"),
         )
+
+
+def _validate_ohlcv(
+    open_price: Decimal,
+    high: Decimal,
+    low: Decimal,
+    close: Decimal,
+    volume: Decimal,
+) -> None:
+    for field_name, value in (
+        ("open", open_price),
+        ("high", high),
+        ("low", low),
+        ("close", close),
+    ):
+        if value <= 0:
+            raise ValueError(f"{field_name} must be positive")
+    if high < low:
+        raise ValueError("high must be at least low")
+    if high < open_price or high < close:
+        raise ValueError("high must be at least open and close")
+    if low > open_price or low > close:
+        raise ValueError("low must be at most open and close")
+    if volume < 0:
+        raise ValueError("volume must not be negative")
 
 
 def _non_blank(value: str, field_name: str) -> str:

@@ -101,7 +101,7 @@ Exact fields and type names belong to feature specs, but these concepts are stab
 
 | Concept | Responsibility |
 | --- | --- |
-| Market record | Normalized price, volume, provider, feed, time, and completeness data |
+| Market bar | One completed OHLCV period: ticker, timeframe, prices, volume, completeness, and provenance |
 | Market signal | Rule, horizon, direction, baseline, observed movement, severity, time, and provenance |
 | News article | Normalized identity, content metadata, symbols, source, and timestamps |
 | News classification | Relevance, category, direction (positive, negative, or unclear), significance, confidence, and model metadata |
