@@ -2,21 +2,43 @@
 
 **Status:** Approved MVP
 
-AI Investment Assistant is a local market-monitoring and research tool for one long-term investor. It watches a small list of US stocks, detects meaningful market or news events, investigates selected events, and sends one focused Discord report for review.
+AI Investment Assistant is a local market-monitoring and research tool for one investor. It watches a small list of US stocks, detects meaningful market or news events, investigates selected events, and sends one focused Discord report for review.
 
 It does not trade, promise certainty, or make final investment decisions. The user remains responsible for every decision.
 
 System boundaries are defined in [`ARCHITECTURE.md`](ARCHITECTURE.md); milestone order is in [`ROADMAP.md`](ROADMAP.md); feature behavior belongs under [`specs/`](../specs/).
 
+## Intended user
+
+The MVP is a **local tool for one person** and a **small US watchlist**. Those are product limits, not a claim that every user has the same strategy.
+
+Users may mix reasons for watching a name. One example is a multi-year thesis (“I want to own AMD for the next several years”) and still acting on meaningful dips, spikes, or news. Other examples include watching a name they do not own yet, comparing a few candidates, or holding some names longer than others. A lasting thesis is **one** valid use, not the required identity.
+
+The assistant notices meaningful situations and prepares a report. The user decides whether to buy, sell, hold, or wait. Day trading, scalping, high-frequency strategies, and autonomous execution are out of scope. See [D-023](DECISIONS.md).
+
 ## Core loop and principles
 
-> Detect qualifying market or news signals → manage one event → assemble evidence → produce a focused report → notify when warranted.
+> Input → notice (signal) → case file (event) → research only if the event needs work → save report → notify when warranted.
+
+A **signal** is a structured notice that something noteworthy happened. An **event** is the saved case file that groups related signals for one situation. Not every signal starts research; see [when an event needs work](#when-an-event-needs-work).
+
+```mermaid
+flowchart LR
+    I["Market and news input"] --> N["Notice<br/>rules + cheap news AI"]
+    N -->|"not noteworthy"| X["Stop"]
+    N -->|"signal"| E["Event manager<br/>case file"]
+    E -->|"routine repeat"| S["Save only"]
+    E -->|"needs work"| R["Focused research"]
+    R --> P["Save report"]
+    P --> O["Notify once"]
+```
 
 - Use ordinary code for measurable rules, filtering, correlation, cooldowns, and deduplication.
 - Allow market and significant news signals to qualify independently; neither is required to validate the other.
 - Let detectors emit signals while one event manager owns promotion and research eligibility.
-- Use AI only for narrow news classification and focused research after escalation.
-- Keep classification inexpensive and separate from research.
+- Use AI only for narrow news classification and focused research after an event needs work.
+- Keep classification inexpensive and on the **news path only**; it does not judge market-rule signals or replace the event manager.
+- Significant news may be positive or negative; direction does not by itself reject an article.
 - Distinguish evidence from inference, cite important sources, and state uncertainty.
 - Prefer recovery, replay, duplicate prevention, and cost control over more indicators or agents.
 - Support review; never issue authoritative buy or sell instructions.
@@ -45,23 +67,42 @@ Both produce the same market-signal shape and use volume and volatility as under
 
 ### News monitoring
 
-Filter company news by watchlist relevance, recency, source, event category, duplicates, and classifier-call limits. Qualifying articles receive a small structured classification with relevance, category, likely significance, direction, confidence, and rationale. Significant news may create an event alone or enrich an existing market episode; rejected news creates no event or cooldown.
+Filter company news by watchlist relevance, recency, source, event category, duplicates, and classifier-call limits. Qualifying articles receive a small, inexpensive structured classification with relevance, category, likely significance, direction (positive, negative, or unclear), confidence, and rationale.
+
+That classifier only answers whether an article is worth turning into a **news signal**. It is not a second research model and it does not decide notification.
+
+Significant news — good or bad — may create an event alone or enrich an existing market episode. Examples that can qualify if classified significant include earnings misses **and** earnings beats, investigations, product recalls, expansions, and acquisitions. Rejected or insignificant news creates no event or cooldown.
+
+The current offline demo only matches a few negative phrases. That is a temporary fixture rule until Milestone 5.
 
 ### Event management
 
 One event manager routes independent market and news signals into durable events rather than letting detectors create research jobs. The MVP must handle:
 
 - Market movement with or without related news.
-- Significant news before a price reaction.
+- Significant news before a price reaction, including significant good news.
 - Broad-market or sector movement.
 - Duplicate articles and materially new evidence.
 - Abrupt movement and gradual multi-day or multi-week movement.
 
 Sustained movement remains one evolving episode. Repeated evidence at the same severity is recorded quietly; a worse severity, a newly crossed horizon, or significant new news may justify another research run and notification. Events retain enough lifecycle state for deduplication, cooldowns, retries, and restart-safe processing.
 
+### When an event needs work
+
+A detector saying “this is a signal” is not the same as “research this now.”
+
+The event **needs work** when the event manager marks it waiting for research (and later notification):
+
+- A first qualifying market or news signal opens a new event and queues research.
+- An update to an existing event queues research again only if it is material: higher importance, a newly crossed market time window, or significant new news.
+- The exact same signal ID is ignored.
+- A different signal at the same or lower importance, without a new window or new significant news, is saved on the event and does **not** start more research.
+
+Unfinished stages (waiting research, interrupted research, saved report awaiting notify, retryable failure) also still need work after a restart.
+
 ### Research
 
-Research runs only for a significant event. It determines what happened, the strongest and competing explanations, whether the event is company-specific or broader, whether evidence may be fundamental, and what remains uncertain.
+Research runs only after an event needs work. It determines what happened, the strongest and competing explanations, whether the event is company-specific or broader, whether evidence may be fundamental, and what remains uncertain.
 
 Research is bounded by time, tool calls, source size, rate, and cost.
 
@@ -111,7 +152,7 @@ The MVP is successful when:
 1. A small configured watchlist can be monitored during regular market hours.
 2. Interrupted data is detected and missing minute bars can be recovered.
 3. Fast and daily deterministic rules detect understandable abrupt and gradual market movement.
-4. News is filtered and classified without researching every article.
+4. News is filtered and classified without researching every article; significant good news and bad news can both qualify.
 5. Independent market and news signals route through one event manager and related signals become one evolving event.
 6. Each research-eligible event or material update produces one bounded research run.
 7. The report follows its schema, cites evidence, and states uncertainty.

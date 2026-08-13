@@ -12,6 +12,18 @@ Investigate significant events and present evidence for human review. Never exec
 
 **Why:** Investment decisions remain under user control.
 
+### D-023 — Do not treat one investor style as the product
+
+The MVP is for one local user and a small US watchlist. That does **not** require a multi-year thesis, buy-and-hold-only behavior, or one reason for watching each name.
+
+A lasting thesis with opportunistic review (buy a discount, consider taking profit after significant news, buy again later) is an in-scope example, not the only user. Other in-scope examples include watching names not yet owned, mixed holding periods on the same list, and active watching without day trading.
+
+Out of scope remain day trading, scalping, high-frequency strategies, and any autonomous buy or sell.
+
+Future detection, classification, research, and notification work must not assume “always hold,” require a long thesis, hide upside or good-news cases, or treat opportunistic review as out of product scope. The assistant still only supports review; the user decides whether to buy, sell, hold, or wait.
+
+**Why:** “Long-term investor” was easy to misread as both buy-and-hold-only and the only persona. The product notices meaningful situations; it does not prescribe one strategy.
+
 ### D-002 — Use one local Python application for the MVP
 
 Run one modular, single-process application; use `asyncio` only where concurrent I/O helps.
@@ -32,7 +44,7 @@ Ordinary code handles measurable rules, filtering, correlation, cooldowns, and d
 
 ### D-005 — Separate news classification from research
 
-A small classifier triages news; capable research runs only after an event qualifies.
+A small classifier triages news; capable research runs only after an event needs work. D-022 records that significance is independent of direction and that the classifier stays on the news path.
 
 **Why:** Continuous monitoring stays affordable without weakening focused research.
 
@@ -125,6 +137,17 @@ Milestone 3 fixes offline market evaluation as follows:
 
 **Why:** Agents and humans need explicit, testable market rules; forever-open episodes would merge unrelated later moves into old stories.
 
+### D-022 — Treat news significance as direction-agnostic; keep the cheap classifier on the news path
+
+This refines D-005 and D-018:
+
+- A news article may be significant whether classification labels it positive (`UP`), negative (`DOWN`), or unclear. Earnings beats, expansions, and acquisitions are in scope if they pass significance; they are not discarded for being good news.
+- The inexpensive structured classifier is **news-path triage only**. It helps decide whether an article becomes a news signal. It does not judge market-rule signals and does not decide research or notification.
+- The event manager still decides whether a new or updated event needs work (research and, if that succeeds, notification).
+- Offline demo detection that matches only a few negative phrases is a temporary Milestone 1/2 fixture rule, not the product news policy. Milestone 5 replaces that rule.
+
+**Why:** Cost control belongs on the news firehose, not by ignoring positive stories. A second AI judge in front of every event would blur responsibilities and still miss market-only cases.
+
 ## Rejected
 
 ### D-015 — Add a separate `RULES.md`
@@ -146,7 +169,7 @@ Decide these in the feature that first needs them:
 - Package and class structure beyond what active milestones already introduced.
 - User-configurable detection thresholds and correlation windows (Milestone 3 ships fixed defaults; configuration can come later).
 - Async worker and queue arrangement.
-- Model selection, prompts, and report wording.
+- Model selection, prompts, and report wording. The split is fixed: inexpensive news classification vs later focused research (D-005, D-022). Exact model names stay feature-level.
 - Optional libraries, deployment, interfaces, and provider failover.
 - Strong live-delivery claim/recovery (for example mark delivery in progress before an external send, and reconcile “sent but not recorded”) when Discord and production notification land (Milestone 7). Milestone 2 only re-checks current update before notify and honors a refused notify save.
 

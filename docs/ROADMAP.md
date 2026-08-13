@@ -63,9 +63,9 @@ Add Alpaca market history and streaming behind the existing input boundary. Add 
 
 **Status:** Not started
 
-Add Alpaca news, deterministic relevance and duplicate filtering, classifier-call limits, and a small structured AI classifier. Significant news may create an event alone or enrich and requeue an existing market episode; rejected news creates no event or cooldown.
+Add Alpaca news, deterministic relevance and duplicate filtering, classifier-call limits, and a small inexpensive structured AI classifier on the news path only. The classifier may mark an article significant whether the story is positive, negative, or unclear. Significant news may create an event alone or enrich and requeue an existing market episode; rejected news creates no event or cooldown. The classifier does not decide research or notification; the existing event manager still does.
 
-**Complete when:** significant news is processed once through the shared event manager without requiring a market trigger or researching every article.
+**Complete when:** significant news of either direction is processed once through the shared event manager without requiring a market trigger or researching every article.
 
 ### Milestone 6 — Research and reporting
 

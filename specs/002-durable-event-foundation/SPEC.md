@@ -30,7 +30,7 @@ Remember important market and news activity, avoid repeating the same work, and 
 
 A signal is a saved indication that market movement or news may be important. An event is the ongoing situation that groups related signals for one ticker.
 
-Each signal has a unique ID, ticker, time, importance level, and enough source information to explain where it came from. Tickers use one standard form, such as changing `tsla` to `TSLA`. A market signal also describes whether price is rising or falling, which rule detected it, and which time window it covers. A news signal describes its category and direction when known. All news signals used here have already passed the future news-significance check.
+Each signal has a unique ID, ticker, time, importance level, and enough source information to explain where it came from. Tickers use one standard form, such as changing `tsla` to `TSLA`. A market signal also describes whether price is rising or falling, which rule detected it, and which time window it covers. A news signal describes its category and direction when known. All news signals used here have already passed the future news-significance check. Product significance is independent of direction ([D-022](../../docs/DECISIONS.md)); this milestone may still feed signals from the offline negative-phrase demo.
 
 Market and news signals do not depend on each other. Either can create an event and request research.
 

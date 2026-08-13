@@ -1,19 +1,23 @@
 # AI Investment Assistant
 
-A local market-monitoring and research assistant for a long-term investor. It detects meaningful market or news events, correlates related signals, performs focused research, and sends one evidence-based report for review. It never trades or makes final investment decisions.
+A local market-monitoring and research assistant. It watches a small list of US stocks, notices meaningful price moves or news, investigates selected situations, and sends one focused report for review.
 
-```text
-market and news data
-  → deterministic detection
-  → unified event management
-  → bounded research
-  → validated report
-  → notification
+It does not trade, promise certainty, or make investment decisions for you.
+
+## How it works
+
+```mermaid
+flowchart LR
+    I["Market and news"] --> N["Notice what matters"]
+    N -->|"not noteworthy"| X["Ignore"]
+    N -->|"noteworthy"| E["Keep one case file"]
+    E -->|"routine update"| S["Save quietly"]
+    E -->|"worth a closer look"| R["Research"]
+    R --> P["Save a report"]
+    P --> O["Notify user"]
 ```
 
-Market and significant news signals may trigger independently; one event manager correlates related evidence and prevents duplicate work.
-
-See the [roadmap](docs/ROADMAP.md) for current status and milestone order.
+Related updates stay on the same case so you are not flooded with repeats. Significant good news and bad news can both start a case. Details live in the [architecture](docs/ARCHITECTURE.md).
 
 ## Setup
 
@@ -33,14 +37,7 @@ uv run mypy src
 uv run pytest
 ```
 
-## Documentation
-
-- [Product](docs/PRODUCT.md) — MVP scope and success criteria
-- [Architecture](docs/ARCHITECTURE.md) — stable boundaries and data flow
-- [Decisions](docs/DECISIONS.md) — durable choices and rejected alternatives
-- [Roadmap](docs/ROADMAP.md) — milestone order and status
-- [Agent instructions](AGENTS.md) — repository workflow and rules
-- [Offline walking skeleton](specs/001-offline-walking-skeleton/SPEC.md) — completed first feature
+Further product, design, and project notes are in [`docs/`](docs/).
 
 ## License
 

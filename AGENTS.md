@@ -43,7 +43,9 @@ Documentation, tooling, and corrective changes may proceed without a feature spe
 - Let market and significant news signals qualify independently; neither gates the other.
 - Keep fast and daily market evaluation in one pipeline with one signal contract.
 - Detectors emit signals; only the event manager decides promotion and research eligibility.
-- Keep news classification separate from research.
+- Keep news classification inexpensive, on the news path only, and separate from research. It does not judge market-rule signals.
+- Treat news significance as independent of direction; significant good news and bad news can both qualify. The offline negative-phrase demo is not the product rule.
+- Do not treat one investor style as the product. A multi-year thesis is one example, not a requirement. Meaningful drops, rises, and significant news should remain reviewable so the user can consider buying, selling, holding, or waiting. Do not add day trading or autonomous execution.
 - Make time and external I/O controllable when behavior depends on them.
 - Preserve provenance when source, feed, retrieval time, or model version affects interpretation.
 - Introduce external services only in their roadmap milestone.
