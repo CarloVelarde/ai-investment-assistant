@@ -13,6 +13,7 @@ from investment_assistant.market_metrics import (
 from investment_assistant.models import (
     Event,
     EventStatus,
+    MarketSignal,
     MarketWindow,
     NewsSignal,
     ResearchReport,
@@ -221,7 +222,7 @@ def test_relative_rule_runs_when_same_session_spy_bar_arrives_later(
     }
 
 
-def _market_signals(database_path: Path) -> tuple[Signal, ...]:
+def _all_signals(database_path: Path) -> tuple[Signal, ...]:
     with SQLiteStorage(database_path) as storage:
         storage.initialize()
         return tuple(
@@ -231,10 +232,18 @@ def _market_signals(database_path: Path) -> tuple[Signal, ...]:
         )
 
 
+def _market_signals(database_path: Path) -> tuple[MarketSignal, ...]:
+    return tuple(
+        signal
+        for signal in _all_signals(database_path)
+        if isinstance(signal, MarketSignal)
+    )
+
+
 def _news_signals(database_path: Path) -> tuple[NewsSignal, ...]:
     return tuple(
         signal
-        for signal in _market_signals(database_path)
+        for signal in _all_signals(database_path)
         if isinstance(signal, NewsSignal)
     )
 
