@@ -19,18 +19,18 @@ New or extended groups:
 | Data | Purpose |
 | --- | --- |
 | Market bars | Completed OHLCV history for watchlist symbols and `SPY` |
-| Detector state | Last emitted importance (or clear) per `(ticker, rule, window, direction)` |
+| Detector state | Last emitted importance (or clear) and last evaluated bar time per `(ticker, rule, window, direction)` |
 | Events | Add `episode_open` (default true for new events) and optional `closed_at` |
 
 Use a stable bar id: `bar:{ticker}:{timeframe}:{start_at_isoformat}`.
 
-Schema version is **2**. `initialize()` creates v2 on an empty database and upgrades a Milestone 2 v1 database in place (adds `episode_open` / `closed_at`, then `market_bars` and `detector_state`). Timeframe values are `1Min` and `1Day`.
+Schema version is **3** after post-review hardening. `initialize()` creates v3 on an empty database and upgrades Milestone 2 v1 through v2, then upgrades v2 in place with evaluated-bar state and explainable market-signal measurements. Timeframe values are `1Min` and `1Day`.
 
 ### Models
 
 Introduce a frozen `MarketBar` (and small enums for timeframe) in `models.py`. Keep detectors dependent on bars + history views, not on fixture JSON.
 
-Extend `MarketSignal` measurement fields only if required for upside and non-decline rules (for example signed change ratio or separate magnitude + direction). Prefer backward-compatible fields: keep `price_decline_ratio` as a non-negative magnitude of adverse move for the signal’s direction, or rename carefully with tests if clearer (`price_move_ratio`). Document the chosen field meaning in code.
+Keep `price_decline_ratio` as a backward-compatible non-negative magnitude in the signal's direction. Persist baseline and observed prices for every detected market signal, plus the comparison return for relative-to-`SPY`, so later evidence assembly can explain the original crossing without recalculating from corrected history.
 
 Milestone 1’s `MarketRecord` single-snapshot helper may remain for old tests until migrated; console and M3 scenarios should not depend on it for detection.
 
@@ -43,7 +43,7 @@ Put threshold tables and metric functions in `market_metrics.py` with no I/O. Fa
 - volume dampening for the fast rule;
 - rearm line = half of `MODERATE` magnitude.
 
-Detectors call these pure functions, then decide emit vs quiet using detector state loaded from storage.
+Detectors call these pure functions, then decide emit vs quiet using detector state loaded from storage. Storage-backed evaluation loads only the bars required for the rule and applies an as-of bound for the triggering bar.
 
 ### Detector state machine
 
@@ -55,7 +55,7 @@ For each key `(ticker, rule, window, direction)`:
 4. If at/above `MODERATE` and (armed or higher importance than last emit) → emit, save new last importance.
 5. Else → quiet continuation.
 
-Persist state in the same transaction style as other storage writes when a scenario step commits detection results.
+Persist the bar, detector state, accepted signals/events, and episode maintenance in one completed-bar transaction. Persist the evaluated bar time so an older backfill cannot rewind newer state. A same-time reevaluation remains allowed for corrected data or delayed `SPY` context and is still governed by crossing/deduplication rules.
 
 ### Episode open/close
 

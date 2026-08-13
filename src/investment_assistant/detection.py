@@ -65,6 +65,8 @@ def detect_market_signal(
         price_decline_ratio=(record.previous_close - record.latest_price)
         / record.previous_close,
         volume_ratio=volume_ratio,
+        baseline_price=record.previous_close,
+        observed_price=record.latest_price,
     )
 
 

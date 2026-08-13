@@ -133,6 +133,13 @@ Milestone 3 fixes offline market evaluation as follows:
 - One fast detector (`abrupt_move` / one-hour) and one after-close daily detector (`multi_day_move`, `drawdown_from_high`, `relative_to_spy`) share the Milestone 2 signal contract and event manager.
 - Thresholds, importance steps, volume dampening for the fast rule, crossing, and rearm (rearm line = half the `MODERATE` magnitude) are defined in the Milestone 3 feature spec, not left open.
 - Detector baseline state is durable so replay does not re-fire settled crossings.
+- Each completed-bar step commits the bar, detector state, emitted signals/events,
+  and episode maintenance atomically. A failed step must not remember an emission
+  that the event manager did not accept.
+- Detector history reads are bounded to the required lookback and evaluated as of
+  the triggering bar. Persisted evaluation time prevents older backfills from
+  rewinding newer detector state, while a later same-session `SPY` bar may complete
+  a previously skipped relative evaluation.
 - Market events track `episode_open`; grouping attaches same-direction market signals only to open episodes. An episode closes when all detector keys for that ticker and direction are clear/armed after daily evaluation. Close does not research by itself; a later new breach creates a new event.
 
 **Why:** Agents and humans need explicit, testable market rules; forever-open episodes would merge unrelated later moves into old stories.

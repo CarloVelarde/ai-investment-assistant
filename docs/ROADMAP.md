@@ -49,7 +49,7 @@ Persist normalized replay bars and implement two deterministic evaluation modes 
 
 Explicit thresholds, severity levels, crossing, rearm, and episode-closing rules live in the feature spec. Add no separate weekly process or configurable cadence initially.
 
-**Completed:** Offline abrupt-drop, gradual-decline, continuation, escalation, recovery, and broad-market scenarios produce understandable signals and one correctly updated event episode without duplicate research. Recovery closes the episode; a later drop starts a new event.
+**Completed:** Offline abrupt-drop, gradual-decline, continuation, escalation, recovery, and broad-market scenarios produce understandable signals and one correctly updated event episode without duplicate research. Recovery closes the episode; a later drop starts a new event. Completed-bar transitions commit atomically, use bounded as-of history, retain their crossing measurements, and tolerate delayed same-session `SPY` context.
 
 ### Milestone 4 — Live market data
 

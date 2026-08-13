@@ -56,6 +56,8 @@ MARKET_SIGNAL = MarketSignal(
     window=MarketWindow.ONE_HOUR,
     price_decline_ratio=Decimal("0.06"),
     volume_ratio=Decimal("1.7"),
+    baseline_price=Decimal("100"),
+    observed_price=Decimal("94"),
 )
 NEWS_SIGNAL = NewsSignal(
     signal_id="news-1",
@@ -299,6 +301,35 @@ def test_version_1_database_migrates_and_keeps_events(tmp_path: Path) -> None:
         )
 
 
+def test_version_2_database_migrates_explainable_signal_fields(tmp_path: Path) -> None:
+    database_path = tmp_path / "legacy-v2.sqlite3"
+    legacy_signal = replace(
+        MARKET_SIGNAL,
+        baseline_price=None,
+        observed_price=None,
+    )
+    with SQLiteStorage(database_path) as storage:
+        storage.initialize()
+        storage.save_event(EVENT)
+        storage.save_signal(legacy_signal, event_id=EVENT.event_id, affected_update=1)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA user_version = 2")
+        for table, column in (
+            ("detector_state", "last_evaluated_at"),
+            ("signals", "baseline_price"),
+            ("signals", "observed_price"),
+            ("signals", "comparison_return_ratio"),
+        ):
+            connection.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+
+    with SQLiteStorage(database_path) as migrated:
+        migrated.initialize()
+        signal = migrated.get_signal(legacy_signal.signal_id)
+
+        assert migrated.database_version == DATABASE_VERSION
+        assert signal == legacy_signal
+
+
 def test_duplicate_bar_ingest_does_not_multiply_rows(tmp_path: Path) -> None:
     updated = replace(
         WATCHLIST_BAR,
@@ -325,3 +356,55 @@ def test_duplicate_bar_ingest_does_not_multiply_rows(tmp_path: Path) -> None:
     assert {bar.bar_id for bar in loaded} == {WATCHLIST_BAR.bar_id, SPY_BAR.bar_id}
     assert tsla_minutes == (updated,)
     assert updated.bar_id == WATCHLIST_BAR.bar_id
+
+
+def test_bounded_as_of_bar_history_excludes_newer_bars(tmp_path: Path) -> None:
+    older = replace(
+        WATCHLIST_BAR,
+        start_at=WATCHLIST_BAR.start_at - timedelta(minutes=1),
+        end_at=WATCHLIST_BAR.end_at - timedelta(minutes=1),
+    )
+    newer = replace(
+        WATCHLIST_BAR,
+        start_at=WATCHLIST_BAR.start_at + timedelta(minutes=1),
+        end_at=WATCHLIST_BAR.end_at + timedelta(minutes=1),
+    )
+
+    with SQLiteStorage(tmp_path / "bounded-bars.sqlite3") as storage:
+        storage.initialize()
+        for bar in (older, WATCHLIST_BAR, newer):
+            storage.save_market_bar(bar)
+
+        loaded = storage.list_market_bars(
+            "TSLA",
+            MarketTimeframe.ONE_MINUTE,
+            complete_only=True,
+            through_start_at=OCCURRED_AT,
+            limit=1,
+        )
+
+    assert loaded == (WATCHLIST_BAR,)
+
+
+def test_stale_or_incomplete_update_cannot_regress_completed_bar(
+    tmp_path: Path,
+) -> None:
+    stale = replace(
+        WATCHLIST_BAR,
+        close=Decimal("245"),
+        low=Decimal("244"),
+        retrieved_at=WATCHLIST_BAR.retrieved_at - timedelta(seconds=1),
+    )
+    later_incomplete = replace(
+        WATCHLIST_BAR,
+        is_complete=False,
+        retrieved_at=WATCHLIST_BAR.retrieved_at + timedelta(seconds=1),
+    )
+
+    with SQLiteStorage(tmp_path / "bar-regression.sqlite3") as storage:
+        storage.initialize()
+        storage.save_market_bar(WATCHLIST_BAR)
+        storage.save_market_bar(stale)
+        storage.save_market_bar(later_incomplete)
+
+        assert storage.get_market_bar(WATCHLIST_BAR.bar_id) == WATCHLIST_BAR

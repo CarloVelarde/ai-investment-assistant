@@ -152,6 +152,8 @@ def test_drawdown_from_high_uses_lookback_high() -> None:
     assert len(signals) == 1
     assert signals[0].importance is SignalImportance.MODERATE
     assert signals[0].price_decline_ratio == Decimal("0.08")
+    assert signals[0].baseline_price == Decimal("100")
+    assert signals[0].observed_price == Decimal("92")
 
 
 def test_relative_to_spy_uses_same_horizon() -> None:
@@ -164,6 +166,9 @@ def test_relative_to_spy_uses_same_horizon() -> None:
     assert len(signals) == 1
     assert signals[0].importance is SignalImportance.MODERATE
     assert signals[0].price_decline_ratio == Decimal("0.05")
+    assert signals[0].baseline_price == Decimal("100")
+    assert signals[0].observed_price == Decimal("94")
+    assert signals[0].comparison_return_ratio == Decimal("-0.01")
 
 
 def test_missing_spy_skips_only_relative_rules() -> None:

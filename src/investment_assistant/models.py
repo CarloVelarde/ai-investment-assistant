@@ -155,11 +155,18 @@ class DetectorState:
     direction: SignalDirection
     last_emitted_importance: SignalImportance | None
     updated_at: datetime
+    last_evaluated_at: datetime | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "ticker", _ticker(self.ticker))
         object.__setattr__(self, "rule", _non_blank(self.rule, "rule"))
         object.__setattr__(self, "updated_at", _as_utc(self.updated_at, "updated_at"))
+        if self.last_evaluated_at is not None:
+            object.__setattr__(
+                self,
+                "last_evaluated_at",
+                _as_utc(self.last_evaluated_at, "last_evaluated_at"),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +198,9 @@ class MarketSignal:
     window: MarketWindow
     price_decline_ratio: Decimal
     volume_ratio: Decimal
+    baseline_price: Decimal | None = None
+    observed_price: Decimal | None = None
+    comparison_return_ratio: Decimal | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "signal_id", _non_blank(self.signal_id, "signal_id"))
@@ -205,6 +215,10 @@ class MarketSignal:
             raise ValueError("price_decline_ratio must not be negative")
         if self.volume_ratio < 0:
             raise ValueError("volume_ratio must not be negative")
+        if self.baseline_price is not None and self.baseline_price <= 0:
+            raise ValueError("baseline_price must be positive")
+        if self.observed_price is not None and self.observed_price <= 0:
+            raise ValueError("observed_price must be positive")
 
     @property
     def symbol(self) -> str:

@@ -101,6 +101,32 @@ def test_news_does_not_reopen_a_closed_market_episode(tmp_path: Path) -> None:
         assert len(storage.list_events()) == 2
 
 
+def test_category_match_does_not_reuse_closed_news_first_market_episode(
+    tmp_path: Path,
+) -> None:
+    later_news = replace(
+        NEWS_SIGNAL,
+        signal_id="news-acme-guidance-2",
+        occurred_at=SIGNAL_TIME + timedelta(days=10),
+    )
+    with SQLiteStorage(tmp_path / "news-first-after-close.sqlite3") as storage:
+        storage.initialize()
+        manager = EventManager(storage, clock=FixedClock(EVENT_TIME))
+        news_first = manager.handle_signal(NEWS_SIGNAL)
+        market = manager.handle_signal(MARKET_SIGNAL)
+        assert news_first.event is not None
+        assert market.event is not None
+        assert market.event.event_id == news_first.event.event_id
+        storage.close_episode(market.event.event_id, closed_at=CLOSE_TIME)
+
+        later = manager.handle_signal(later_news)
+
+        assert later.event is not None
+        assert later.event.event_id != market.event.event_id
+        assert later.event.episode_open is True
+        assert len(storage.list_events()) == 2
+
+
 def test_close_does_not_create_research(tmp_path: Path) -> None:
     research_calls: list[int] = []
 

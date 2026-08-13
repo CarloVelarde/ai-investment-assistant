@@ -70,6 +70,10 @@ class MarketDetectionResult:
     diagnostics: tuple[str, ...] = ()
 
 
+FAST_HISTORY_LIMIT = FAST_LOOKBACK_BARS + 1
+DAILY_HISTORY_LIMIT = max(MULTI_DAY_LOOKBACKS.values()) + 1
+
+
 def decide_crossing(
     *,
     ticker: str,
@@ -80,6 +84,7 @@ def decide_crossing(
     candidate_importance: SignalImportance | None,
     previous: DetectorState | None,
     now: datetime,
+    evaluated_at: datetime | None = None,
 ) -> CrossingDecision:
     """Apply cross / escalate / quiet / rearm rules for one detector key."""
 
@@ -87,6 +92,10 @@ def decide_crossing(
         raise ValueError("magnitude must not be negative")
     table = thresholds_for(rule, window)
     last = None if previous is None else previous.last_emitted_importance
+    state_updated_at = now if previous is None else max(now, previous.updated_at)
+    state_evaluated_at = evaluated_at
+    if state_evaluated_at is None and previous is not None:
+        state_evaluated_at = previous.last_evaluated_at
 
     if candidate_importance is None and magnitude < table.rearm_line:
         return CrossingDecision(
@@ -97,7 +106,8 @@ def decide_crossing(
                 window,
                 direction,
                 last_emitted_importance=None,
-                now=now,
+                now=state_updated_at,
+                evaluated_at=state_evaluated_at,
             ),
         )
 
@@ -112,7 +122,8 @@ def decide_crossing(
                 window,
                 direction,
                 last_emitted_importance=candidate_importance,
-                now=now,
+                now=state_updated_at,
+                evaluated_at=state_evaluated_at,
             ),
         )
 
@@ -124,7 +135,8 @@ def decide_crossing(
             window,
             direction,
             last_emitted_importance=last,
-            now=now,
+            now=state_updated_at,
+            evaluated_at=state_evaluated_at,
         ),
     )
 
@@ -152,6 +164,7 @@ def evaluate_and_store_crossing(
         candidate_importance=importance,
         previous=previous,
         now=now,
+        evaluated_at=now,
     )
     storage.save_detector_state(decision.next_state)
     return decision
@@ -178,6 +191,9 @@ def detect_fast_signals(
     signals: list[MarketSignal] = []
     states: list[DetectorState] = []
     for direction in SignalDirection:
+        previous = previous_states.get(direction)
+        if _key_already_evaluated(previous, latest.start_at):
+            continue
         magnitude = directional_magnitude(move, direction)
         candidate = dampen_importance(
             table.importance_for(magnitude),
@@ -190,8 +206,9 @@ def detect_fast_signals(
             direction=direction,
             magnitude=magnitude,
             candidate_importance=candidate,
-            previous=previous_states.get(direction),
+            previous=previous,
             now=now,
+            evaluated_at=latest.start_at,
         )
         states.append(decision.next_state)
         if decision.emit_importance is not None:
@@ -204,6 +221,8 @@ def detect_fast_signals(
                     window=MarketWindow.ONE_HOUR,
                     magnitude=magnitude,
                     volume_ratio=stored_volume,
+                    baseline_price=baseline.close,
+                    comparison_return_ratio=None,
                 )
             )
     return MarketDetectionResult(tuple(signals), tuple(states))
@@ -242,6 +261,8 @@ def detect_daily_signals(
             now=now,
             signals=signals,
             states=states,
+            baseline_price=start.close,
+            comparison_return_ratio=None,
         )
 
     if len(ticker_days) >= DRAWDOWN_LOOKBACK_BARS:
@@ -267,6 +288,12 @@ def detect_daily_signals(
                 now=now,
                 signals=signals,
                 states=states,
+                baseline_price=(
+                    max(bar.high for bar in window_bars)
+                    if direction is SignalDirection.DOWN
+                    else min(bar.low for bar in window_bars)
+                ),
+                comparison_return_ratio=None,
             )
 
     for window, lookback in MULTI_DAY_LOOKBACKS.items():
@@ -294,6 +321,8 @@ def detect_daily_signals(
             now=now,
             signals=signals,
             states=states,
+            baseline_price=start.close,
+            comparison_return_ratio=signed_return(spy_start.close, spy_latest.close),
         )
 
     return MarketDetectionResult(tuple(signals), tuple(states), tuple(diagnostics))
@@ -304,6 +333,7 @@ def detect_fast_from_storage(
     ticker: str,
     *,
     now: datetime,
+    through_start_at: datetime | None = None,
 ) -> MarketDetectionResult:
     """Run the fast detector from persisted minute bars and state."""
 
@@ -312,6 +342,8 @@ def detect_fast_from_storage(
         ticker,
         MarketTimeframe.ONE_MINUTE,
         complete_only=True,
+        through_start_at=through_start_at,
+        limit=FAST_HISTORY_LIMIT,
     )
     previous = {
         direction: storage.get_detector_state(
@@ -332,6 +364,7 @@ def detect_daily_from_storage(
     ticker: str,
     *,
     now: datetime,
+    through_start_at: datetime | None = None,
 ) -> MarketDetectionResult:
     """Run the daily detector from persisted daily bars and state."""
 
@@ -340,11 +373,15 @@ def detect_daily_from_storage(
         ticker,
         MarketTimeframe.ONE_DAY,
         complete_only=True,
+        through_start_at=through_start_at,
+        limit=DAILY_HISTORY_LIMIT,
     )
     spy_bars = storage.list_market_bars(
         SPY_TICKER,
         MarketTimeframe.ONE_DAY,
         complete_only=True,
+        through_start_at=through_start_at,
+        limit=DAILY_HISTORY_LIMIT,
     )
     previous = {
         (rule, window, direction): storage.get_detector_state(
@@ -405,6 +442,8 @@ def _collect_signed_rule(
     now: datetime,
     signals: list[MarketSignal],
     states: list[DetectorState],
+    baseline_price: Decimal,
+    comparison_return_ratio: Decimal | None,
 ) -> None:
     for direction in SignalDirection:
         _collect_one_key(
@@ -417,6 +456,8 @@ def _collect_signed_rule(
             now=now,
             signals=signals,
             states=states,
+            baseline_price=baseline_price,
+            comparison_return_ratio=comparison_return_ratio,
         )
 
 
@@ -431,7 +472,12 @@ def _collect_one_key(
     now: datetime,
     signals: list[MarketSignal],
     states: list[DetectorState],
+    baseline_price: Decimal,
+    comparison_return_ratio: Decimal | None,
 ) -> None:
+    previous = previous_states.get((rule, window, direction))
+    if _key_already_evaluated(previous, latest.start_at):
+        return
     candidate = thresholds_for(rule, window).importance_for(magnitude)
     decision = decide_crossing(
         ticker=latest.ticker,
@@ -440,8 +486,9 @@ def _collect_one_key(
         direction=direction,
         magnitude=magnitude,
         candidate_importance=candidate,
-        previous=previous_states.get((rule, window, direction)),
+        previous=previous,
         now=now,
+        evaluated_at=latest.start_at,
     )
     states.append(decision.next_state)
     if decision.emit_importance is not None:
@@ -454,6 +501,8 @@ def _collect_one_key(
                 window=window,
                 magnitude=magnitude,
                 volume_ratio=UNUSED_VOLUME_RATIO,
+                baseline_price=baseline_price,
+                comparison_return_ratio=comparison_return_ratio,
             )
         )
 
@@ -467,6 +516,8 @@ def _market_signal(
     window: MarketWindow,
     magnitude: Decimal,
     volume_ratio: Decimal,
+    baseline_price: Decimal,
+    comparison_return_ratio: Decimal | None,
 ) -> MarketSignal:
     return MarketSignal(
         signal_id=stable_signal_id(
@@ -491,6 +542,9 @@ def _market_signal(
         window=window,
         price_decline_ratio=magnitude,
         volume_ratio=volume_ratio,
+        baseline_price=baseline_price,
+        observed_price=bar.close,
+        comparison_return_ratio=comparison_return_ratio,
     )
 
 
@@ -535,6 +589,7 @@ def _state(
     *,
     last_emitted_importance: SignalImportance | None,
     now: datetime,
+    evaluated_at: datetime | None,
 ) -> DetectorState:
     return DetectorState(
         ticker=ticker,
@@ -543,6 +598,18 @@ def _state(
         direction=direction,
         last_emitted_importance=last_emitted_importance,
         updated_at=now,
+        last_evaluated_at=evaluated_at,
+    )
+
+
+def _key_already_evaluated(
+    state: DetectorState | None,
+    evaluated_at: datetime,
+) -> bool:
+    return (
+        state is not None
+        and state.last_evaluated_at is not None
+        and state.last_evaluated_at > evaluated_at
     )
 
 

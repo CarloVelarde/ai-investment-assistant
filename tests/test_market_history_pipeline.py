@@ -4,7 +4,11 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from investment_assistant.clock import SteppingClock
+from investment_assistant.event_manager import EventManager
+from investment_assistant.fixture_readers import load_market_history_fixture
 from investment_assistant.models import (
     Event,
     EventStatus,
@@ -13,8 +17,9 @@ from investment_assistant.models import (
     Signal,
     SignalDirection,
 )
-from investment_assistant.pipeline import run_market_history
+from investment_assistant.pipeline import process_market_bar, run_market_history
 from investment_assistant.reporting import create_fake_research_report
+from investment_assistant.storage import SQLiteStorage
 
 HISTORY_DIR = (
     Path(__file__).parents[1]
@@ -124,6 +129,44 @@ def test_gradual_decline_and_broad_market_use_daily_rules(tmp_path: Path) -> Non
         window is MarketWindow.FIVE_DAYS for window in broad.events[0].market_windows
     )
     assert broad.diagnostics == ()
+
+
+def test_bar_detection_and_event_acceptance_roll_back_together(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, bars = load_market_history_fixture(HISTORY_DIR / "abrupt_drop.json")
+    database_path = tmp_path / "atomic-bar.sqlite3"
+    clock = SteppingClock(START_TIME)
+
+    with SQLiteStorage(database_path) as storage:
+        storage.initialize()
+        manager = EventManager(storage, clock=clock)
+        for bar in bars[:-1]:
+            process_market_bar(
+                storage=storage,
+                manager=manager,
+                bar=bar,
+                watchlist=frozenset({"TSLA"}),
+                now=bar.end_at,
+            )
+
+        def fail_after_detection(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("simulated event failure")
+
+        monkeypatch.setattr(manager, "handle_signal", fail_after_detection)
+        with pytest.raises(RuntimeError, match="simulated event failure"):
+            process_market_bar(
+                storage=storage,
+                manager=manager,
+                bar=bars[-1],
+                watchlist=frozenset({"TSLA"}),
+                now=bars[-1].end_at,
+            )
+
+        assert storage.get_market_bar(bars[-1].bar_id) is None
+        assert storage.list_detector_states("TSLA") == ()
+        assert storage.list_events() == ()
 
 
 def _recording_researcher(

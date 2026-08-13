@@ -64,6 +64,7 @@ Detection consumes normalized records and only produces signals; it does not enq
 
 - The fast market detector evaluates completed bars for abrupt movement and emits only on a qualifying threshold crossing or material severity escalation; same-severity continuation stays quiet until rearm.
 - The after-close daily market detector uses the same history to evaluate five- and twenty-trading-day movement, recent-high drawdown, and performance relative to `SPY`.
+- Storage-backed detector reads are bounded to the rule lookback and evaluated as of the triggering bar. Older recovered bars cannot rewind newer detector state; delayed same-session `SPY` data can complete a relative rule that was skipped earlier.
 - News passes deterministic filters before a small structured classifier. The classifier may emit a significant news signal without a market signal. Significance is independent of direction: good news (for example an earnings beat or acquisition) and bad news can both qualify. Rejected articles never become signals. The current offline fixtures use a temporary negative-phrase rule until Milestone 5.
 
 There is no separate weekly pipeline. Exact thresholds, severity boundaries, and rearm rules are feature-level decisions (Milestone 3 owns the first offline market set). Detector baseline state is durable for replay. Detection failures remain visible without crashing the application.
@@ -90,6 +91,9 @@ SQLite stores the state needed for recovery, history, replay, and idempotency:
 - Notification attempts and failures.
 
 Writes pass through one controlled application boundary.
+For market ingestion, one completed-bar transaction owns the bar write, detector
+state, signal/event acceptance, and episode maintenance so a partial failure cannot
+suppress a signal that was never durably accepted.
 
 ### Output
 

@@ -92,6 +92,8 @@ def test_fast_detector_emits_moderate_one_hour_drop() -> None:
     assert signal.importance is SignalImportance.MODERATE
     assert signal.price_decline_ratio == Decimal("0.03")
     assert signal.volume_ratio == Decimal("2")
+    assert signal.baseline_price == Decimal("100")
+    assert signal.observed_price == Decimal("97")
     assert signal.occurred_at == START + timedelta(minutes=61)
 
 
@@ -187,3 +189,37 @@ def test_fast_detector_reads_completed_bars_from_storage(tmp_path: Path) -> None
 
     assert _down_signal(first).importance is SignalImportance.CRITICAL
     assert replay.signals == ()
+
+
+def test_older_as_of_evaluation_cannot_rewind_newer_state(tmp_path: Path) -> None:
+    bars = _series(Decimal("92"), count=66)
+    with SQLiteStorage(tmp_path / "stale-fast.sqlite3") as storage:
+        storage.initialize()
+        for bar in bars:
+            storage.save_market_bar(bar)
+
+        newest = detect_fast_from_storage(
+            storage,
+            "TSLA",
+            now=NOW,
+            through_start_at=bars[-1].start_at,
+        )
+        stale = detect_fast_from_storage(
+            storage,
+            "TSLA",
+            now=NOW + timedelta(minutes=1),
+            through_start_at=bars[-2].start_at,
+        )
+        state = storage.get_detector_state(
+            "TSLA",
+            RULE_ABRUPT_MOVE,
+            MarketWindow.ONE_HOUR,
+            SignalDirection.DOWN,
+        )
+
+    assert newest.signals
+    assert stale.signals == ()
+    assert stale.states == ()
+    assert state is not None
+    assert state.last_evaluated_at == bars[-1].start_at
+    assert state.last_emitted_importance is SignalImportance.CRITICAL

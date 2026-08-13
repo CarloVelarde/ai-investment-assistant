@@ -1,5 +1,6 @@
 """End-to-end scenario tests for Milestone 3 acceptance criteria AC-06–AC-10."""
 
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -195,6 +196,29 @@ def test_ac10_relative_to_spy_distinguishes_company_and_market_moves(
     assert market.diagnostics == ()
     assert company.events[0].episode_open is True
     assert market.events[0].episode_open is True
+
+
+def test_relative_rule_runs_when_same_session_spy_bar_arrives_later(
+    tmp_path: Path,
+) -> None:
+    fixture = json.loads((HISTORY_DIR / "broad_market.json").read_text())
+    latest_spy = [bar for bar in fixture["bars"] if bar["ticker"] == "SPY"][-1]
+    latest_spy["end_at"] = "2026-01-25T21:01:00+00:00"
+    latest_spy["retrieved_at"] = "2026-01-25T21:06:00+00:00"
+    fixture_path = tmp_path / "delayed-spy.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+    database_path = tmp_path / "delayed-spy.sqlite3"
+
+    run_market_history(
+        database_path=database_path,
+        fixture_path=fixture_path,
+        clock=SteppingClock(START_TIME),
+        notifier=lambda *_: None,
+    )
+
+    assert RULE_RELATIVE_TO_SPY in {
+        signal.rule for signal in _market_signals(database_path)
+    }
 
 
 def _market_signals(database_path: Path) -> tuple[Signal, ...]:

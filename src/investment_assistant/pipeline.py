@@ -68,6 +68,15 @@ class MarketHistoryRunResult:
 
 
 @dataclass(frozen=True, slots=True)
+class MarketBarProcessingResult:
+    """Committed outcome of ingesting and evaluating one market bar."""
+
+    accepted_signal_ids: tuple[str, ...] = ()
+    diagnostics: tuple[str, ...] = ()
+    closed_event_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class PipelineResult:
     """Fixture normalization, detection, and durable processing results."""
 
@@ -145,35 +154,17 @@ def run_market_history(
         storage.initialize()
         manager = EventManager(storage, clock=clock)
         for bar in _bars_in_evaluation_order(bars):
-            storage.save_market_bar(bar)
             _sync_clock(clock, bar.end_at)
-            if not bar.is_complete or bar.ticker not in watched:
-                continue
-            if bar.timeframe is MarketTimeframe.ONE_MINUTE:
-                result = detect_fast_from_storage(
-                    storage,
-                    bar.ticker,
-                    now=clock.now(),
-                )
-            elif bar.timeframe is MarketTimeframe.ONE_DAY:
-                result = detect_daily_from_storage(
-                    storage,
-                    bar.ticker,
-                    now=clock.now(),
-                )
-            else:
-                continue
-            diagnostics.extend(result.diagnostics)
-            for signal in result.signals:
-                if manager.handle_signal(signal).accepted:
-                    accepted_signal_ids.append(signal.signal_id)
-            if bar.timeframe is MarketTimeframe.ONE_DAY:
-                closed = maintain_market_episodes(
-                    storage,
-                    bar.ticker,
-                    now=clock.now(),
-                )
-                closed_event_ids.extend(event.event_id for event in closed)
+            outcome = process_market_bar(
+                storage=storage,
+                manager=manager,
+                bar=bar,
+                watchlist=watched,
+                now=clock.now(),
+            )
+            diagnostics.extend(outcome.diagnostics)
+            accepted_signal_ids.extend(outcome.accepted_signal_ids)
+            closed_event_ids.extend(outcome.closed_event_ids)
 
         processed_events = manager.process_pending(
             researcher=researcher,
@@ -204,6 +195,66 @@ def run_market_history(
             diagnostics=tuple(diagnostics),
             closed_event_ids=tuple(closed_event_ids),
         )
+
+
+def process_market_bar(
+    *,
+    storage: SQLiteStorage,
+    manager: EventManager,
+    bar: MarketBar,
+    watchlist: frozenset[str],
+    now: datetime,
+) -> MarketBarProcessingResult:
+    """Atomically save one bar and commit every resulting state transition."""
+
+    diagnostics: list[str] = []
+    accepted_signal_ids: list[str] = []
+    closed_event_ids: list[str] = []
+    with storage.transaction():
+        storage.save_market_bar(bar)
+        if not bar.is_complete:
+            return MarketBarProcessingResult()
+        evaluation_tickers: tuple[str, ...]
+        if bar.ticker in watchlist:
+            evaluation_tickers = (bar.ticker,)
+        elif bar.ticker == "SPY" and bar.timeframe is MarketTimeframe.ONE_DAY:
+            evaluation_tickers = tuple(sorted(watchlist))
+        else:
+            return MarketBarProcessingResult()
+        evaluation_through = (
+            bar.end_at
+            if bar.ticker == "SPY" and bar.timeframe is MarketTimeframe.ONE_DAY
+            else bar.start_at
+        )
+        for ticker in evaluation_tickers:
+            if bar.timeframe is MarketTimeframe.ONE_MINUTE:
+                result = detect_fast_from_storage(
+                    storage,
+                    ticker,
+                    now=now,
+                    through_start_at=evaluation_through,
+                )
+            elif bar.timeframe is MarketTimeframe.ONE_DAY:
+                result = detect_daily_from_storage(
+                    storage,
+                    ticker,
+                    now=now,
+                    through_start_at=evaluation_through,
+                )
+            else:
+                continue
+            diagnostics.extend(result.diagnostics)
+            for signal in result.signals:
+                if manager.handle_signal(signal).accepted:
+                    accepted_signal_ids.append(signal.signal_id)
+            if bar.timeframe is MarketTimeframe.ONE_DAY:
+                closed = maintain_market_episodes(storage, ticker, now=now)
+                closed_event_ids.extend(event.event_id for event in closed)
+    return MarketBarProcessingResult(
+        accepted_signal_ids=tuple(accepted_signal_ids),
+        diagnostics=tuple(diagnostics),
+        closed_event_ids=tuple(closed_event_ids),
+    )
 
 
 def run_pipeline(

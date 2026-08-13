@@ -24,6 +24,8 @@ advance an event through research or notification.
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -48,7 +50,7 @@ from investment_assistant.models import (
     SourceDetails,
 )
 
-DATABASE_VERSION = 2
+DATABASE_VERSION = 3
 
 _MARKET_HISTORY_TABLES = """
 CREATE TABLE IF NOT EXISTS market_bars (
@@ -79,6 +81,7 @@ CREATE TABLE IF NOT EXISTS detector_state (
     direction TEXT NOT NULL,
     last_emitted_importance TEXT,
     updated_at TEXT NOT NULL,
+    last_evaluated_at TEXT,
     PRIMARY KEY (ticker, rule, window, direction)
 );
 """
@@ -118,6 +121,9 @@ CREATE TABLE IF NOT EXISTS signals (
     market_window TEXT,
     price_decline_ratio TEXT,
     volume_ratio TEXT,
+    baseline_price TEXT,
+    observed_price TEXT,
+    comparison_return_ratio TEXT,
     news_category TEXT,
     headline TEXT,
     matched_phrase TEXT
@@ -178,7 +184,7 @@ ALTER TABLE events ADD COLUMN episode_open INTEGER NOT NULL DEFAULT 1
 ALTER TABLE events ADD COLUMN closed_at TEXT;
 """
     + _MARKET_HISTORY_TABLES
-    + f"\nPRAGMA user_version = {DATABASE_VERSION};\n"
+    + "\nPRAGMA user_version = 2;\n"
 )
 
 
@@ -189,6 +195,7 @@ class SQLiteStorage:
         self._connection = sqlite3.connect(path)
         self._connection.row_factory = sqlite3.Row
         self._connection.execute("PRAGMA foreign_keys = ON")
+        self._transaction_depth = 0
 
     def __enter__(self) -> SQLiteStorage:
         return self
@@ -205,13 +212,75 @@ class SQLiteStorage:
         """Create or upgrade the layout, or validate the current version."""
 
         version = self.database_version
-        if version not in (0, 1, DATABASE_VERSION):
+        if version not in (0, 1, 2, DATABASE_VERSION):
             raise ValueError(f"unsupported SQLite database version: {version}")
-        with self._connection:
-            if version == 1:
-                self._connection.executescript(_MIGRATE_V1_TO_V2)
-            else:
-                self._connection.executescript(_SCHEMA)
+        if version == 0:
+            self._run_script_atomically(_SCHEMA)
+            return
+        if version == 1:
+            self._run_script_atomically(_MIGRATE_V1_TO_V2)
+            version = 2
+        if version == 2:
+            self._migrate_v2_to_v3()
+        self._run_script_atomically(_SCHEMA)
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Group nested storage writes into one atomic commit."""
+
+        if self._transaction_depth > 0:
+            self._transaction_depth += 1
+            try:
+                yield
+            finally:
+                self._transaction_depth -= 1
+            return
+
+        self._connection.execute("BEGIN")
+        self._transaction_depth = 1
+        try:
+            yield
+        except BaseException:
+            self._connection.rollback()
+            raise
+        else:
+            self._connection.commit()
+        finally:
+            self._transaction_depth = 0
+
+    def _run_script_atomically(self, script: str) -> None:
+        try:
+            self._connection.executescript(f"BEGIN IMMEDIATE;\n{script}\nCOMMIT;")
+        except BaseException:
+            self._connection.rollback()
+            raise
+
+    def _migrate_v2_to_v3(self) -> None:
+        columns = (
+            ("detector_state", "last_evaluated_at", "TEXT"),
+            ("signals", "baseline_price", "TEXT"),
+            ("signals", "observed_price", "TEXT"),
+            ("signals", "comparison_return_ratio", "TEXT"),
+        )
+        with self.transaction():
+            for table, column, definition in columns:
+                if not self._table_exists(table) or column in self._column_names(table):
+                    continue
+                self._connection.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+                )
+            self._connection.execute(f"PRAGMA user_version = {DATABASE_VERSION}")
+
+    def _table_exists(self, table: str) -> bool:
+        row = self._connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table,),
+        ).fetchone()
+        return row is not None
+
+    def _column_names(self, table: str) -> frozenset[str]:
+        rows = self._connection.execute(f"PRAGMA table_info({table})").fetchall()
+        return frozenset(str(row["name"]) for row in rows)
 
     def close(self) -> None:
         """Close the owned database connection."""
@@ -239,7 +308,7 @@ class SQLiteStorage:
     def save_event(self, event: Event) -> None:
         """Insert or replace the evolving values of one event."""
 
-        with self._connection:
+        with self.transaction():
             self._write_event(event)
 
     def get_event(self, event_id: str) -> Event | None:
@@ -268,7 +337,7 @@ class SQLiteStorage:
     ) -> Event | None:
         """Persist research start for the current event update."""
 
-        with self._connection:
+        with self.transaction():
             cursor = self._connection.execute(
                 """
                 UPDATE events
@@ -321,7 +390,7 @@ class SQLiteStorage:
     def close_episode(self, event_id: str, *, closed_at: datetime) -> Event | None:
         """Mark an open episode closed without changing research status."""
 
-        with self._connection:
+        with self.transaction():
             cursor = self._connection.execute(
                 """
                 UPDATE events
@@ -335,10 +404,11 @@ class SQLiteStorage:
         return self.get_event(event_id)
 
     def find_category_events(self, ticker: str, category: str) -> tuple[Event, ...]:
-        """Find category candidates used when news has no clear market match."""
+        """Find open category candidates when news has no clear market match."""
 
         rows = self._connection.execute(
-            "SELECT * FROM events WHERE ticker = ? AND category = ? "
+            "SELECT * FROM events "
+            "WHERE ticker = ? AND category = ? AND episode_open = 1 "
             "ORDER BY created_at, event_id",
             (ticker, category),
         ).fetchall()
@@ -347,7 +417,7 @@ class SQLiteStorage:
     def record_signal(self, signal: Signal, event: Event) -> bool:
         """Atomically save a new signal and its new or updated event."""
 
-        with self._connection:
+        with self.transaction():
             duplicate = self._connection.execute(
                 "SELECT 1 FROM signals WHERE signal_id = ?",
                 (signal.signal_id,),
@@ -367,7 +437,7 @@ class SQLiteStorage:
     ) -> None:
         """Save a signal linked to an already persisted event."""
 
-        with self._connection:
+        with self.transaction():
             self._write_signal(signal, event_id, affected_update)
 
     def get_signal(self, signal_id: str) -> Signal | None:
@@ -391,7 +461,7 @@ class SQLiteStorage:
     def save_report(self, report: ResearchReport) -> None:
         """Persist one report for a specific event update."""
 
-        with self._connection:
+        with self.transaction():
             self._write_report(report)
 
     def save_report_and_mark_reported(
@@ -402,7 +472,7 @@ class SQLiteStorage:
     ) -> bool:
         """Atomically save a current report and mark it ready for delivery."""
 
-        with self._connection:
+        with self.transaction():
             current = self._connection.execute(
                 """
                 SELECT 1 FROM events
@@ -466,7 +536,7 @@ class SQLiteStorage:
     def save_notification_attempt(self, attempt: NotificationAttempt) -> None:
         """Persist one notification attempt."""
 
-        with self._connection:
+        with self.transaction():
             self._write_notification_attempt(attempt)
 
     def save_notification_result(
@@ -486,7 +556,7 @@ class SQLiteStorage:
             or failure.step is not FailureStep.NOTIFICATION
         ):
             raise ValueError("notification failure must match its attempt")
-        with self._connection:
+        with self.transaction():
             current = self._connection.execute(
                 """
                 SELECT 1 FROM events
@@ -566,7 +636,7 @@ class SQLiteStorage:
     def save_failure(self, failure: ProcessingFailure) -> None:
         """Persist one safe processing failure."""
 
-        with self._connection:
+        with self.transaction():
             self._write_failure(failure)
 
     def save_failure_and_mark_failed(
@@ -577,7 +647,7 @@ class SQLiteStorage:
     ) -> bool:
         """Atomically save a current processing failure and failed state."""
 
-        with self._connection:
+        with self.transaction():
             current = self._connection.execute(
                 "SELECT 1 FROM events WHERE event_id = ? AND current_update = ?",
                 (failure.event_id, failure.event_update),
@@ -630,7 +700,7 @@ class SQLiteStorage:
     def save_market_bar(self, bar: MarketBar) -> None:
         """Insert or replace one market bar by its stable identity."""
 
-        with self._connection:
+        with self.transaction():
             self._write_market_bar(bar)
 
     def get_market_bar(self, bar_id: str) -> MarketBar | None:
@@ -648,8 +718,14 @@ class SQLiteStorage:
         timeframe: MarketTimeframe | None = None,
         *,
         complete_only: bool = False,
+        start_at_or_after: datetime | None = None,
+        through_start_at: datetime | None = None,
+        limit: int | None = None,
     ) -> tuple[MarketBar, ...]:
-        """Reload bars in start time order, optionally filtered."""
+        """Reload a bounded, optionally as-of history in start time order."""
+
+        if limit is not None and limit < 1:
+            raise ValueError("limit must be at least 1")
 
         conditions: list[str] = []
         params: list[object] = []
@@ -661,17 +737,30 @@ class SQLiteStorage:
             params.append(timeframe.value)
         if complete_only:
             conditions.append("is_complete = 1")
+        if start_at_or_after is not None:
+            conditions.append("start_at >= ?")
+            params.append(_timestamp(start_at_or_after))
+        if through_start_at is not None:
+            conditions.append("start_at <= ?")
+            params.append(_timestamp(through_start_at))
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        order = "DESC" if limit is not None else "ASC"
+        limit_sql = " LIMIT ?" if limit is not None else ""
+        if limit is not None:
+            params.append(limit)
         rows = self._connection.execute(
-            f"SELECT * FROM market_bars{where} ORDER BY start_at, bar_id",
+            f"SELECT * FROM market_bars{where} "
+            f"ORDER BY start_at {order}, bar_id {order}{limit_sql}",
             params,
         ).fetchall()
+        if limit is not None:
+            rows.reverse()
         return tuple(_market_bar_from_row(row) for row in rows)
 
     def save_detector_state(self, state: DetectorState) -> None:
         """Insert or replace detector baseline state for one key."""
 
-        with self._connection:
+        with self.transaction():
             self._write_detector_state(state)
 
     def get_detector_state(
@@ -787,6 +876,13 @@ class SQLiteStorage:
                 signal.window.value,
                 str(signal.price_decline_ratio),
                 str(signal.volume_ratio),
+                (None if signal.baseline_price is None else str(signal.baseline_price)),
+                (None if signal.observed_price is None else str(signal.observed_price)),
+                (
+                    None
+                    if signal.comparison_return_ratio is None
+                    else str(signal.comparison_return_ratio)
+                ),
                 None,
                 None,
                 None,
@@ -795,6 +891,9 @@ class SQLiteStorage:
             specific_values = (
                 "NEWS",
                 None if signal.direction is None else signal.direction.value,
+                None,
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -810,8 +909,9 @@ class SQLiteStorage:
                 importance, source_provider, source_name, source_feed,
                 retrieved_at, signal_type, direction, market_rule,
                 market_window, price_decline_ratio, volume_ratio,
+                baseline_price, observed_price, comparison_return_ratio,
                 news_category, headline, matched_phrase
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (*common_values, *specific_values),
         )
@@ -873,6 +973,8 @@ class SQLiteStorage:
                 provider = excluded.provider,
                 feed = excluded.feed,
                 retrieved_at = excluded.retrieved_at
+            WHERE excluded.retrieved_at >= market_bars.retrieved_at
+              AND (market_bars.is_complete = 0 OR excluded.is_complete = 1)
             """,
             (
                 bar.bar_id,
@@ -897,11 +999,12 @@ class SQLiteStorage:
             """
             INSERT INTO detector_state (
                 ticker, rule, window, direction, last_emitted_importance,
-                updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                updated_at, last_evaluated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(ticker, rule, window, direction) DO UPDATE SET
                 last_emitted_importance = excluded.last_emitted_importance,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                last_evaluated_at = excluded.last_evaluated_at
             """,
             (
                 state.ticker,
@@ -914,6 +1017,11 @@ class SQLiteStorage:
                     else state.last_emitted_importance.value
                 ),
                 _timestamp(state.updated_at),
+                (
+                    None
+                    if state.last_evaluated_at is None
+                    else _timestamp(state.last_evaluated_at)
+                ),
             ),
         )
 
@@ -999,6 +1107,7 @@ def _detector_state_from_row(row: sqlite3.Row) -> DetectorState:
             None if importance is None else SignalImportance(importance)
         ),
         updated_at=_datetime(row["updated_at"]),
+        last_evaluated_at=_optional_datetime(row["last_evaluated_at"]),
     )
 
 
@@ -1043,6 +1152,9 @@ def _signal_from_row(row: sqlite3.Row) -> Signal:
             volume_ratio=Decimal(
                 _required(_optional_text(row["volume_ratio"]), "volume_ratio")
             ),
+            baseline_price=_optional_decimal(row["baseline_price"]),
+            observed_price=_optional_decimal(row["observed_price"]),
+            comparison_return_ratio=_optional_decimal(row["comparison_return_ratio"]),
         )
     if row["signal_type"] == "NEWS":
         return NewsSignal(
@@ -1088,6 +1200,10 @@ def _optional_datetime(value: object) -> datetime | None:
 
 def _optional_text(value: object) -> str | None:
     return None if value is None else str(value)
+
+
+def _optional_decimal(value: object) -> Decimal | None:
+    return None if value is None else Decimal(str(value))
 
 
 def _required(value: str | None, field_name: str) -> str:

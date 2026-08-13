@@ -18,6 +18,7 @@
 - [x] 10. Wire offline pipeline: ingest bars in time order → detect → handle_signal → episode maintenance → process_pending. Replace console reliance on the Milestone 1 toy market rule with history-based detection for this path.
 - [x] 11. Add end-to-end scenario tests proving AC-06–AC-10 (events, single latest research on escalation, recovery close, new event after close, relative-to-`SPY` behavior) with controllable clock and temporary DB.
 - [x] 12. Confirm no live services, workers, ORM, or configurable cadence were introduced; update permanent docs only if implementation forces a durable decision change; run all repository checks.
+- [x] 13. Post-review hardening: atomically commit each bar's detection/event transitions, bound storage reads as of the triggering bar, prevent older backfills from rewinding detector state, retain crossing measurements, handle delayed same-session `SPY`, and prevent category matching from reusing closed episodes.
 
 ## Acceptance coverage
 
