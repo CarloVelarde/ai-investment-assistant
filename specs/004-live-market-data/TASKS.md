@@ -7,8 +7,8 @@
 ## Tasks
 
 - [x] 1. Extend settings for Alpaca key id, secret, feed (`iex` default), trading URL, and watchlist. Prove missing keys stay offline, secrets are not logged, `SPY` is always watched, and more than 30 symbols including `SPY` is rejected.
-- [ ] 2. Map Alpaca-shaped REST/stream bar payloads to `MarketBar` (UTC times, `1Min`/`1Day` end times, provider/feed/retrieved_at). Add validation tests with no network.
-- [ ] 3. Add a market-data port and an in-memory fake (history pages, stream minutes, clock open/close). Production code talks to the port only.
+- [x] 2. Map Alpaca-shaped REST/stream bar payloads to `MarketBar` (UTC times, `1Min`/`1Day` end times, provider/feed/retrieved_at). Add validation tests with no network.
+- [x] 3. Add a market-data port and an in-memory fake (history pages, stream minutes, clock open/close). Production code talks to the port only.
 - [ ] 4. Implement REST history fetch with pagination and safe 429 backoff behind the port. Test multi-symbol pages and a SIP-permission failure diagnostic.
 - [ ] 5. Implement startup backfill into existing bar storage and quiet detector replay before the live cutoff. Test old bars update state but do not research; a cutoff-or-later qualifying bar can emit.
 - [ ] 6. Implement the stock stream adapter for completed `bars` and `updatedBars`. Test regular-session filter, first crossing, quiet continuation, and revision replace/re-evaluate.
