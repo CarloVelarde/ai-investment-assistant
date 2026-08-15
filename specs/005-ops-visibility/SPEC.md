@@ -86,11 +86,11 @@ Never put secrets in the watch log. Do not subscribe extra stream channels to ge
 
 ## Acceptance criteria
 
-- [ ] AC-01: Default settings emit no heartbeat and no watch-log lines. `LOG_LEVEL=INFO` and `LOG_JSON=true` stay the defaults.
-- [ ] AC-02: `HEARTBEAT=true` with default JSON `INFO` emits a heartbeat on the regular logger about every 60 seconds during a live loop, including when the session is closed and no minutes arrive.
-- [ ] AC-03: `HEARTBEAT=false` never emits a heartbeat, even if watch log is on.
-- [ ] AC-04: `WATCH_LOG=true` emits a plain-text narrative of a canned live cycle (backfill → subscribe → minute → daily or idle). `WATCH_LOG=false` does not.
-- [ ] AC-05: Heartbeat and watch log can be enabled independently. Secrets never appear. Tests use fakes and no network. Ruff, mypy, and pytest pass.
+- [x] AC-01: Default settings emit no heartbeat and no watch-log lines. `LOG_LEVEL=INFO` and `LOG_JSON=true` stay the defaults.
+- [x] AC-02: `HEARTBEAT=true` with default JSON `INFO` emits a heartbeat on the regular logger about every 60 seconds during a live loop, including when the session is closed and no minutes arrive.
+- [x] AC-03: `HEARTBEAT=false` never emits a heartbeat, even if watch log is on.
+- [x] AC-04: `WATCH_LOG=true` emits a plain-text narrative of a canned live cycle (backfill → subscribe → minute → daily or idle). `WATCH_LOG=false` does not.
+- [x] AC-05: Heartbeat and watch log can be enabled independently. Secrets never appear. Tests use fakes and no network. Ruff, mypy, and pytest pass.
 
 ## Constraints
 

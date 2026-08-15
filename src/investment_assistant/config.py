@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     log_json: bool = True
+    heartbeat: bool = False
+    watch_log: bool = False
     database_path: Path = Path("investment_assistant.db")
     alpaca_api_key_id: str = ""
     alpaca_api_secret_key: SecretStr = SecretStr("")

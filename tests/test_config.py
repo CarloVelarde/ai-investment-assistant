@@ -16,6 +16,8 @@ _SETTINGS_ENV = (
     "INVESTMENT_ASSISTANT_ENVIRONMENT",
     "INVESTMENT_ASSISTANT_LOG_LEVEL",
     "INVESTMENT_ASSISTANT_LOG_JSON",
+    "INVESTMENT_ASSISTANT_HEARTBEAT",
+    "INVESTMENT_ASSISTANT_WATCH_LOG",
     "INVESTMENT_ASSISTANT_DATABASE_PATH",
     "INVESTMENT_ASSISTANT_ALPACA_API_KEY_ID",
     "INVESTMENT_ASSISTANT_ALPACA_API_SECRET_KEY",
@@ -49,6 +51,8 @@ def test_default_settings(
     assert settings.environment == "development"
     assert settings.log_level == "INFO"
     assert settings.log_json is True
+    assert settings.heartbeat is False
+    assert settings.watch_log is False
     assert settings.database_path == Path("investment_assistant.db")
     assert settings.alpaca_api_key_id == ""
     assert settings.alpaca_api_secret_key.get_secret_value() == ""
@@ -56,6 +60,34 @@ def test_default_settings(
     assert settings.alpaca_trading_url == DEFAULT_ALPACA_TRADING_URL
     assert settings.watchlist == ""
     assert settings.live_mode is False
+
+
+def test_heartbeat_and_watch_log_load_from_environment_without_changing_live_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _clear_settings_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("INVESTMENT_ASSISTANT_HEARTBEAT", "true")
+    monkeypatch.setenv("INVESTMENT_ASSISTANT_WATCH_LOG", "true")
+
+    settings = Settings()
+
+    assert settings.heartbeat is True
+    assert settings.watch_log is True
+    assert settings.live_mode is False
+    assert settings.log_level == "INFO"
+    assert settings.log_json is True
+
+
+def test_invalid_heartbeat_flag_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _clear_settings_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("INVESTMENT_ASSISTANT_HEARTBEAT", "sometimes")
+
+    with pytest.raises(ValidationError):
+        Settings()
 
 
 def test_database_path_can_be_loaded_from_environment(

@@ -24,6 +24,7 @@ from investment_assistant.market_data import (
     stream_minute_from_alpaca,
 )
 from investment_assistant.models import MarketBar, MarketTimeframe
+from investment_assistant.ops_log import watch
 from investment_assistant.pipeline import MarketBarProcessingResult, process_market_bar
 from investment_assistant.storage import SQLiteStorage
 
@@ -132,16 +133,33 @@ def ingest_stream_minute(
     )
     if not is_regular_session_minute(bar.start_at):
         storage.save_market_bar(bar)
+        watch(
+            "Stream minute stored",
+            ticker=bar.ticker,
+            kind=event.kind.value,
+            start_at=bar.start_at.isoformat(),
+            evaluated=False,
+        )
         return MarketBarProcessingResult(
             diagnostics=(f"stored extended-hours minute {bar.bar_id}",),
         )
-    return process_market_bar(
+    result = process_market_bar(
         storage=storage,
         manager=manager,
         bar=bar,
         watchlist=watched,
         now=now,
     )
+    watch(
+        "Stream minute evaluated",
+        ticker=bar.ticker,
+        kind=event.kind.value,
+        start_at=bar.start_at.isoformat(),
+        evaluated=True,
+        accepted=len(result.accepted_signal_ids),
+        closed=len(result.closed_event_ids),
+    )
+    return result
 
 
 def ingest_stream_payload(
@@ -157,6 +175,7 @@ def ingest_stream_payload(
     """Map one Alpaca stream message and ingest completed minutes only."""
 
     if payload.get("T") == "d":
+        watch("Ignored running daily bar", ticker=str(payload.get("S", "")))
         return MarketBarProcessingResult(
             diagnostics=("ignored running daily bar",),
         )
@@ -243,6 +262,11 @@ def run_after_close_daily(
         "After-close daily fetch",
         extra={"session_day": session_day.isoformat(), "bars": len(bars)},
     )
+    watch(
+        "After-close daily fetch",
+        session_day=session_day.isoformat(),
+        bars=len(bars),
+    )
     return _replay_bars(
         storage=storage,
         manager=manager,
@@ -304,6 +328,7 @@ def reconnect_stream(
         "Stock stream reconnecting",
         extra={"attempt": attempt + 1, "delay_seconds": delay},
     )
+    watch("Stock stream reconnecting", attempt=attempt + 1, delay_seconds=delay)
     sleeper(delay)
     _resubscribe(provider)
     gap = fill_minute_gap(
@@ -370,6 +395,7 @@ def recover_stale_stream(
         "Stale stock stream",
         extra={"diagnostics": list(status.diagnostics)},
     )
+    watch("Stale stock stream", diagnostics=",".join(status.diagnostics))
     if status.socket_silent:
         return reconnect_stream(
             storage=storage,

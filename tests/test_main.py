@@ -294,5 +294,7 @@ def test_env_example_documents_live_settings_without_secrets() -> None:
     assert "INVESTMENT_ASSISTANT_ALPACA_API_SECRET_KEY=" in text
     assert "INVESTMENT_ASSISTANT_ALPACA_FEED=iex" in text
     assert "INVESTMENT_ASSISTANT_WATCHLIST=" in text
+    assert "INVESTMENT_ASSISTANT_HEARTBEAT=false" in text
+    assert "INVESTMENT_ASSISTANT_WATCH_LOG=false" in text
     assert SECRET not in text
     assert "sk-" not in text

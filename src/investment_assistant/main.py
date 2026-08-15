@@ -29,6 +29,12 @@ from investment_assistant.market_data import (
     MarketData,
     MarketDataError,
     last_closed_session_date,
+    live_cutoff,
+)
+from investment_assistant.ops_log import (
+    emit_heartbeat,
+    heartbeat_is_due,
+    watch,
 )
 from investment_assistant.pipeline import run_market_history
 from investment_assistant.reporting import (
@@ -56,6 +62,7 @@ def main(
     provider: MarketData | None = None,
     clock: Clock | None = None,
     loop: bool = True,
+    max_cycles: int | None = None,
     sleeper: Callable[[float], None] | None = None,
     researcher: Researcher = create_fake_research_report,
     notifier: Notifier = emit_console_notification,
@@ -72,6 +79,7 @@ def main(
     configure_logging(
         level=settings.log_level,
         use_json=settings.log_json,
+        watch_log=settings.watch_log,
     )
     logger.info(
         "Application started",
@@ -80,7 +88,15 @@ def main(
             "live_mode": settings.live_mode,
         },
     )
+    watch(
+        "Application started",
+        live_mode=settings.live_mode,
+        feed=settings.alpaca_feed,
+        database_path=str(settings.database_path),
+        watchlist=(",".join(settings.watched_tickers()) if settings.live_mode else ""),
+    )
     if not settings.live_mode:
+        watch("Offline fixture path")
         run_offline_console(settings)
         return None
     live_clock = clock or SystemClock()
@@ -91,6 +107,7 @@ def main(
         provider=live_provider,
         clock=live_clock,
         loop=loop,
+        max_cycles=max_cycles,
         sleeper=poll,
         researcher=researcher,
         notifier=notifier,
@@ -122,6 +139,7 @@ def run_live_session(
     sleeper: Callable[[float], None],
     researcher: Researcher,
     notifier: Notifier,
+    max_cycles: int | None = None,
 ) -> LiveIngestResult:
     """Run startup backfill, then one or more live cycles."""
 
@@ -129,6 +147,8 @@ def run_live_session(
     health = StreamHealth(started_at=clock.now())
     latest = LiveIngestResult()
     last_daily_date = None
+    last_heartbeat_at: datetime | None = None
+    cycles = 0
     with SQLiteStorage(settings.database_path) as storage:
         storage.initialize()
         manager = EventManager(storage, clock=clock)
@@ -139,7 +159,20 @@ def run_live_session(
             watchlist=watchlist,
             clock=clock,
         )
+        watch(
+            "Backfill complete",
+            bars=len(latest.persisted_bar_ids),
+            accepted=len(latest.accepted_signal_ids),
+            cutoff=live_cutoff(clock.now()).isoformat(),
+        )
         _open_stock_stream(provider)
+        watch(
+            "Stock stream ready",
+            url=getattr(provider, "stock_stream_url", None),
+            symbols=",".join(watchlist),
+            channels="bars,updatedBars",
+        )
+        heartbeat_started_at = clock.now()
         while True:
             stream = ingest_stream_minutes(
                 storage=storage,
@@ -150,6 +183,12 @@ def run_live_session(
                 health=health,
             )
             latest = _combine(latest, stream)
+            if stream.persisted_bar_ids:
+                watch(
+                    "Stream minutes ingested",
+                    minutes=len(stream.persisted_bar_ids),
+                    accepted=len(stream.accepted_signal_ids),
+                )
             session = provider.get_session()
             if not session.is_open:
                 session_day = last_closed_session_date(clock.now())
@@ -163,6 +202,12 @@ def run_live_session(
                     )
                     latest = _combine(latest, daily)
                     last_daily_date = session_day
+                    watch(
+                        "After-close daily scan",
+                        session_day=session_day.isoformat(),
+                        bars=len(daily.persisted_bar_ids),
+                        accepted=len(daily.accepted_signal_ids),
+                    )
             reconnected = _reconnect_if_dropped(
                 provider,
                 storage=storage,
@@ -173,6 +218,10 @@ def run_live_session(
             )
             if reconnected is not None:
                 latest = _combine(latest, reconnected)
+                watch(
+                    "Stock stream reconnected",
+                    bars=len(reconnected.persisted_bar_ids),
+                )
             stale = diagnose_stream_health(
                 health,
                 now=clock.now(),
@@ -189,8 +238,40 @@ def run_live_session(
                     sleeper=sleeper,
                 )
                 latest = _combine(latest, recovered)
-            manager.process_pending(researcher=researcher, notifier=notifier)
+                watch(
+                    "Stale stream recovered",
+                    diagnostics=",".join(stale.diagnostics),
+                    bars=len(recovered.persisted_bar_ids),
+                )
+            processed = manager.process_pending(
+                researcher=researcher,
+                notifier=notifier,
+            )
+            if processed:
+                watch(
+                    "Pending events processed",
+                    events=len(processed),
+                    tickers=",".join(event.ticker for event in processed),
+                )
+            now = clock.now()
+            if settings.heartbeat and heartbeat_is_due(
+                now=now,
+                started_at=heartbeat_started_at,
+                last_emitted_at=last_heartbeat_at,
+            ):
+                emit_heartbeat(
+                    logger,
+                    now=now,
+                    session_open=session.is_open,
+                    last_message_at=health.last_message_at,
+                    last_spy_regular_end_at=health.last_spy_regular_end_at,
+                    waiting_on_socket=True,
+                )
+                last_heartbeat_at = now
+            cycles += 1
             if not loop:
+                break
+            if max_cycles is not None and cycles >= max_cycles:
                 break
             if not getattr(provider, "holds_stock_stream", False):
                 sleeper(LIVE_POLL_SECONDS)

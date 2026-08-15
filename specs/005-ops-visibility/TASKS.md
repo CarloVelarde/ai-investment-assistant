@@ -2,14 +2,14 @@
 
 **Document status:** Approved
 
-**Execution status:** Not started
+**Execution status:** Complete
 
 ## Tasks
 
-- [ ] 1. Add `heartbeat` and `watch_log` settings (default false). Prove they load from the environment, stay off by default, and do not change live-mode or secret handling.
-- [ ] 2. Emit a regular-logger heartbeat every 60 seconds in the live loop when heartbeat is on, including a closed session with no minutes. Prove heartbeat off stays silent even if watch log is on. Use a fake clock.
-- [ ] 3. Add the watch logger and stage lines for a canned live cycle. Prove the narrative appears only when watch log is on, is plain text, and never includes secrets.
-- [ ] 4. Document the flags in `.env.example` if anything drifted; run all repository checks.
+- [x] 1. Add `heartbeat` and `watch_log` settings (default false). Prove they load from the environment, stay off by default, and do not change live-mode or secret handling.
+- [x] 2. Emit a regular-logger heartbeat every 60 seconds in the live loop when heartbeat is on, including a closed session with no minutes. Prove heartbeat off stays silent even if watch log is on. Use a fake clock.
+- [x] 3. Add the watch logger and stage lines for a canned live cycle. Prove the narrative appears only when watch log is on, is plain text, and never includes secrets.
+- [x] 4. Document the flags in `.env.example` if anything drifted; run all repository checks.
 
 ## Acceptance coverage
 

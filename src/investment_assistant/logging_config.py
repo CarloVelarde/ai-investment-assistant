@@ -5,6 +5,17 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from investment_assistant.ops_log import configure_watch_log
+
+_JSON_EXTRA_FIELDS = (
+    "environment",
+    "live_mode",
+    "session_open",
+    "waiting_on_socket",
+    "last_message_age_seconds",
+    "last_spy_regular_end_at",
+)
+
 
 class JsonFormatter(logging.Formatter):
     """Format log records as JSON"""
@@ -17,8 +28,9 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
         }
 
-        if hasattr(record, "environment"):
-            log_entry["environment"] = record.environment
+        for name in _JSON_EXTRA_FIELDS:
+            if hasattr(record, name):
+                log_entry[name] = getattr(record, name)
 
         if record.exc_info:
             log_entry["exception"] = self.formatException(record.exc_info)
@@ -26,7 +38,12 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(log_entry)
 
 
-def configure_logging(*, level: str, use_json: bool) -> None:
+def configure_logging(
+    *,
+    level: str,
+    use_json: bool,
+    watch_log: bool = False,
+) -> None:
     """Configure application-wide console logging."""
 
     handler = logging.StreamHandler()
@@ -43,3 +60,4 @@ def configure_logging(*, level: str, use_json: bool) -> None:
         handlers=[handler],
         force=True,
     )
+    configure_watch_log(watch_log)

@@ -4,9 +4,7 @@
 
 ## Current focus
 
-**Milestone 4 — Live market data** is complete. The next product feature is Milestone 5 (live news and classification). Do not start it until that spec is approved.
-
-A small tooling spec, [`specs/005-ops-visibility/`](../specs/005-ops-visibility/SPEC.md), covers opt-in heartbeat and watch logging. It can be implemented without blocking Milestone 5 and does not change detectors or events.
+**Milestone 4 — Live market data** is complete. Opt-in heartbeat and watch logging ([spec 005](../specs/005-ops-visibility/SPEC.md)) is in. The next product feature is Milestone 5 (live news and classification). Do not start it until that spec is approved.
 
 ## Milestones
 

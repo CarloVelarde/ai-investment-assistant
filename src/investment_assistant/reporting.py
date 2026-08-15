@@ -8,6 +8,7 @@ from investment_assistant.models import (
     ResearchReport,
     Signal,
 )
+from investment_assistant.ops_log import watch
 
 FAKE_RESEARCH_PREFIX = "FAKE RESEARCH — NOT INVESTMENT ANALYSIS"
 EVENT_NOTIFICATION_PREFIX = "EVENT NOTIFICATION"
@@ -52,4 +53,10 @@ def emit_console_notification(
         event.event_id,
         event.current_update,
         report.summary,
+    )
+    watch(
+        "Event notification",
+        ticker=event.ticker,
+        event_id=event.event_id,
+        update=event.current_update,
     )
