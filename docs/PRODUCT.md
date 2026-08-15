@@ -63,7 +63,7 @@ Maintain normalized market history for the watchlist and a few comparison symbol
 - A fast detector evaluates completed bars for abrupt movement.
 - A fixed after-close daily scan evaluates five- and twenty-trading-day movement, drawdown from a recent high, and performance relative to `SPY`.
 
-Both produce the same market-signal shape and use volume and volatility as understandable supporting inputs. Exact thresholds belong to their feature specs. Detect stale or interrupted data and recover missing bars when possible.
+Both produce the same market-signal shape and use volume and volatility as understandable supporting inputs. Exact thresholds belong to their feature specs. During regular hours the live app watches completed one-minute bars from one stock stream so a sudden drop or rise can surface shortly after the minute ends. Detect stale or interrupted data and recover missing bars when possible.
 
 ### News monitoring
 

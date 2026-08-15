@@ -2,7 +2,7 @@
 
 **Document status:** Approved
 
-**Execution status:** Complete
+**Execution status:** In progress — remaining: live stock websocket
 
 ## Tasks
 
@@ -17,6 +17,10 @@
 - [x] 9. Implement stale-stream rules (socket silence vs one missing illiquid minute). Test diagnostics and that a single skipped IEX minute is not fatal.
 - [x] 10. Wire `main`: live loop when keys exist, existing abrupt-drop fixture path when they do not. Add `.env.example`. Keep one process.
 - [x] 11. Confirm no news client, Discord, workers, ORM, or weekly cadence were added; update `docs/DECISIONS.md` only if a durable choice changed; run all repository checks.
+- [ ] 12. Add a replaceable stock-stream transport (connect, auth, subscribe, read frames, close). Tests use a fake transport and never open a network socket.
+- [ ] 13. Drive `AlpacaMarketData` from that transport: authenticate, subscribe `bars` + `updatedBars` for the watchlist plus `SPY`, map frames to `StreamMinute`, reject `dailyBars`. Test the handshake and frame mapping with canned JSON.
+- [ ] 14. Wire `main`'s live loop to open that one socket after backfill and ingest minutes as they arrive, reusing existing stale/reconnect/gap fill. Missing keys still use the offline fixture. Keep one process.
+- [ ] 15. Confirm the news websocket was not opened; update `docs/DECISIONS.md` only if a durable choice changed; run all repository checks.
 
 ## Acceptance coverage
 
@@ -32,6 +36,8 @@
 | AC-08 | 9 |
 | AC-09 | 1, 6 |
 | AC-10 | 10–11 |
+| AC-11 | 12–14 |
+| AC-12 | 13–15 |
 
 ## Implementation notes for agents
 

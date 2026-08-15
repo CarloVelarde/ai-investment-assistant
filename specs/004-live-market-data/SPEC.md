@@ -1,10 +1,12 @@
 # Feature Specification: Live Market Data
 
-**Document status:** Approved
+**Document status:** Approved — remaining slice: live stock websocket
 
 ## Purpose
 
-Connect a small US watchlist to Alpaca so real completed bars — not only offline fixtures — feed the Milestone 3 detectors and event manager. The app should start up, recover missing history, stay connected during regular hours, and notice the same kinds of moves it already notices in replay.
+Connect a small US watchlist to Alpaca so real completed bars — not only offline fixtures — feed the Milestone 3 detectors and event manager. The app should start up, recover missing history, **stay connected during regular hours on one stock websocket**, and notice sudden drops or rises shortly after each completed minute, the same way it already notices those moves in replay.
+
+REST history and the after-close daily scan are already wired. They do not replace daytime streaming. Until the socket is open, the app cannot watch prices during the session.
 
 ## Scope
 
@@ -13,7 +15,7 @@ Connect a small US watchlist to Alpaca so real completed bars — not only offli
 - Load Alpaca credentials, feed choice, and watchlist from the environment.
 - Add a replaceable market-data boundary. Alpaca is the first live adapter. SDK types stay behind that boundary.
 - Fetch historical `1Min` and `1Day` bars over REST, normalize them to `MarketBar`, and persist them idempotently.
-- Stream completed minute bars (and late minute revisions) during regular hours.
+- Stream completed minute bars (and late minute revisions) during regular hours **by opening one live stock websocket** in the production live loop.
 - On startup and after a disconnect, backfill gaps from the last saved bar to now.
 - After the regular session closes, fetch completed daily bars and run the existing daily detector.
 - Detect a stale or dead stream, reconnect with backoff, and leave a clear diagnostic.
@@ -105,7 +107,7 @@ Reject incomplete or invalid bars the same way Milestone 3 already does. SDK obj
 4. Persist bars idempotently by existing bar identity.
 5. **Quiet replay:** walk backfilled bars in time order and update detector state **without** sending signals to the event manager when the bar ended before the live cutoff.
 6. **Live cutoff:** the start of today’s regular session. If the app starts after close, today’s completed daily bar is eligible to emit.
-7. Open one stock stream, subscribe, and process new completed minutes through the existing ingest path (save → detect → handle_signal → episode maintenance).
+7. **Open one stock websocket** to `wss://stream.data.alpaca.markets/v2/{feed}`, authenticate with the same keys, subscribe the watchlist (including `SPY`) to `bars` and `updatedBars` only, and process each completed minute through the existing ingest path (save → detect → handle_signal). This step is the remaining implementation. A fake or empty iterator is not enough for live mode.
 
 Quiet replay exists so a restart does not research last month’s already-settled crash, but today’s open stress can still surface.
 
@@ -149,6 +151,8 @@ There is still no weekly job and no user cadence setting.
 - [x] AC-08: A stale stream during regular hours is diagnosed. A single missing IEX minute on an illiquid name is not treated as a dead stream.
 - [x] AC-09: Watchlist plus `SPY` longer than 30 symbols is rejected. Extended-hours minute bars do not run the fast detector.
 - [x] AC-10: Live mode adds no news client, Discord, workers, ORM, or weekly process. Tests use fakes and no network. Ruff, mypy, and pytest pass.
+- [ ] AC-11: With live keys, `main` opens **one** stock websocket to `wss://stream.data.alpaca.markets/v2/{feed}`, authenticates, and subscribes the watchlist plus `SPY` to `bars` and `updatedBars` only. It does not open the news socket or a second stock connection. Failed auth is a safe diagnostic (no secret printed).
+- [ ] AC-12: Frames from that socket become `StreamMinute` values at the adapter and go through the existing ingest path. Tests inject a fake transport and never open a network socket. A qualifying regular-session minute can still emit; `dailyBars` still do not.
 
 ## Constraints
 
@@ -156,9 +160,9 @@ There is still no weekly job and no user cadence setting.
 - One process. `asyncio` is allowed for the socket and timers.
 - Built-in `sqlite3` only. No new database product.
 - Default feed is IEX so a free Basic account works.
-- Introduce `alpaca-py` only behind the adapter. Tests must not need it to talk to the network.
+- Introduce `alpaca-py` or a websocket client only behind the adapter. Tests must not need it to talk to the network.
 - Never add brokerage order endpoints.
 
 ## Open questions
 
-- None for this draft. Feed default, daily source, regular-session filter, quiet replay cutoff, and news deferral are fixed above. Tune stale timers later only with live evidence (Milestone 8).
+- None for the remaining slice. The stock socket URL, `bars` + `updatedBars` only, one connection, and news deferral are fixed above. Which library opens the socket is an implementation choice behind the adapter. Tune stale timers later only with live evidence (Milestone 8).

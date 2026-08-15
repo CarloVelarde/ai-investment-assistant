@@ -159,7 +159,7 @@ This refines D-005 and D-018:
 
 Milestone 4 connects live prices without changing Milestone 3 detectors:
 
-- Alpaca REST supplies history; one stock websocket supplies completed minute bars and late minute revisions. SDK types stop at the adapter.
+- Alpaca REST supplies history; **one stock websocket** supplies completed minute bars and late minute revisions during regular hours. That socket is required for daytime watch. REST backfill and after-close daily are not a substitute. SDK types stop at the adapter.
 - Default feed is IEX so a free Basic account works. SIP is optional config when the account allows it.
 - Streaming `dailyBars` are not completed days. Daily evaluation uses REST `1Day` bars after the regular close.
 - Fast evaluation uses regular-session minutes only (09:30–16:00 ET).
