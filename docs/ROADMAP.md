@@ -4,7 +4,9 @@
 
 ## Current focus
 
-**Milestone 4 — Live market data** is active again. REST backfill and after-close daily are in. The remaining slice is the live Alpaca stock websocket so completed minutes can be noticed during regular hours. Do not start Milestone 5 (news) until that socket is wired.
+**Milestone 4 — Live market data** is complete. The next product feature is Milestone 5 (live news and classification). Do not start it until that spec is approved.
+
+A small tooling spec, [`specs/005-ops-visibility/`](../specs/005-ops-visibility/SPEC.md), covers opt-in heartbeat and watch logging. It can be implemented without blocking Milestone 5 and does not change detectors or events.
 
 ## Milestones
 
@@ -53,15 +55,13 @@ Explicit thresholds, severity levels, crossing, rearm, and episode-closing rules
 
 ### Milestone 4 — Live market data
 
-**Status:** In progress — live stock websocket remaining
+**Status:** Complete
 
 **Spec:** [`specs/004-live-market-data/`](../specs/004-live-market-data/SPEC.md)
 
 Add Alpaca market history and streaming behind the existing input boundary. Add stream health, reconnection, stale-data detection, missing-bar backfill, and invocation of the fast and daily detectors without changing their core rules.
 
-**Done so far:** Settings, normalization, the market-data port, REST backfill, quiet replay, stream *ingest*, after-close daily, reconnect/gap fill, and stale-stream rules. `main` uses the live path when keys exist. Production REST and the trading clock use stdlib HTTP.
-
-**Remaining:** Open **one** stock websocket (`wss://stream.data.alpaca.markets/v2/{feed}`), authenticate, subscribe the watchlist plus `SPY` to `bars` and `updatedBars`, and feed those completed minutes through the existing ingest path. Daytime abrupt moves cannot be noticed until this lands. Do not open the news socket.
+**Completed:** Settings, normalization, the market-data port, REST backfill, quiet replay, stream ingest, after-close daily, reconnect/gap fill, and stale-stream rules. `main` uses the live path when keys exist. Production REST and the trading clock use stdlib HTTP. Live mode opens **one** stock websocket (`wss://stream.data.alpaca.markets/v2/{feed}`), authenticates, subscribes the watchlist plus `SPY` to `bars` and `updatedBars`, and feeds completed minutes through the existing ingest path. The news socket is not opened.
 
 **Complete when:** a small watchlist reliably feeds normalized live and recovered bars through both market evaluation modes during regular market operation.
 

@@ -143,7 +143,7 @@ Lifecycle state survives restarts. Interrupted research resumes research, while 
 - Retry transient failures with bounded backoff.
 - Record invalid model output and unavailable research or delivery.
 - Enforce classifier, research, tool, source-size, time, rate, and cost limits.
-- Expose structured logs and basic health information.
+- Expose structured logs and basic health information. Default logs are quiet JSON at `INFO`. Heartbeat and the watch log are independent opt-ins (D-025); they do not change detection or event rules.
 - Load credentials from the environment; never place them in fixtures, logs, or prompts.
 - Validate external input and model output at their boundaries.
 - Provide no brokerage or order-execution capability.
@@ -153,6 +153,7 @@ Lifecycle state survives restarts. Interrupted research resumes research, while 
 - [Offline walking skeleton](../specs/001-offline-walking-skeleton/SPEC.md) proved fixtures → detection → event → fake research → console notify without live services.
 - [Durable event foundation](../specs/002-durable-event-foundation/SPEC.md) added SQLite lifecycle state and independent market/news promotion through one event manager.
 - [Market history and offline detection](../specs/003-market-history-and-offline-detection/SPEC.md) added persisted bars, fast/daily deterministic market rules, detector rearm state, and open/closed market episodes.
-- [Live market data](../specs/004-live-market-data/SPEC.md) feeds those same bars from Alpaca REST history and after-close daily bars. The remaining Milestone 4 slice opens one stock websocket so completed regular-session minutes reach the fast detector in near real time.
+- [Live market data](../specs/004-live-market-data/SPEC.md) feeds those same bars from Alpaca REST history, after-close daily bars, and one stock websocket so completed regular-session minutes reach the fast detector in near real time.
+- [Ops visibility](../specs/005-ops-visibility/SPEC.md) adds an optional live heartbeat and a separate optional watch logger. It does not change market rules or replace Milestone 5.
 
 That path does not make news a gate for market events or market movement a gate for significant news. Later milestones add live market data, news classification that can accept significant good or bad news, real research, and Discord in roadmap order. Offline news detection today is a negative-phrase demo only.

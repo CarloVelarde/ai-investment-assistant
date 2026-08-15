@@ -28,6 +28,21 @@ uv sync
 uv run ai-investment-assistant
 ```
 
+Copy `.env.example` to `.env` and fill in Alpaca keys only if you want the live watch. Missing keys keep the offline fixture demo.
+
+Default logs are quiet JSON at `INFO`. Two optional switches do not change that default:
+
+```bash
+# Still JSON INFO, plus a periodic “still watching” line (useful on weekends)
+INVESTMENT_ASSISTANT_HEARTBEAT=true
+
+# Separate human-readable story of the run (backfill, socket, minutes, daily, events)
+INVESTMENT_ASSISTANT_WATCH_LOG=true
+
+# Easier-to-read standard logs (does not turn heartbeat or watch log on)
+INVESTMENT_ASSISTANT_LOG_JSON=false
+```
+
 ## Checks
 
 ```bash

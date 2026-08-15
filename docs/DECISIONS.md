@@ -169,6 +169,19 @@ Milestone 4 connects live prices without changing Milestone 3 detectors:
 
 **Why:** The live source should be replaceable and safe on the free plan. Detectors stay local and testable.
 
+### D-025 — Default logs stay quiet; heartbeat and watch log are independent opt-ins
+
+Normal operation uses structured JSON at `INFO`. That path stays quiet unless something noteworthy happens (connect, subscribe, daily fetch, warning, notification).
+
+Two optional switches are independent of each other and of `LOG_LEVEL` / `LOG_JSON`:
+
+- **Heartbeat** (`INVESTMENT_ASSISTANT_HEARTBEAT`) is a simple on/off. When on, the regular app logger emits a short “still watching” line on a fixed interval. It is useful with the default JSON `INFO` settings, including weekends when no bars arrive.
+- **Watch log** (`INVESTMENT_ASSISTANT_WATCH_LOG`) is a separate human-readable logger that narrates the run end to end. It is for deep debugging, not everyday use.
+
+Neither is on by default. Secrets never appear in either stream. Interval and wording stay feature-level.
+
+**Why:** Idle live mode must be able to look alive without turning the default log into a firehose. Verbose tracing must not be required to get a heartbeat.
+
 ## Rejected
 
 ### D-015 — Add a separate `RULES.md`
@@ -198,3 +211,4 @@ Resolved in feature specs / accepted decisions above when applicable:
 
 - Detection thresholds, severity, rearm, and market episode open/close → D-021 and Milestone 3 spec.
 - Live market source, IEX default, after-close daily REST, quiet backfill → D-024 and Milestone 4 spec.
+- Quiet default logs; independent heartbeat and watch-log opt-ins → D-025 and the ops-visibility spec.

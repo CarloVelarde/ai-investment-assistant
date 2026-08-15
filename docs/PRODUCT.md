@@ -127,7 +127,7 @@ These prompt further review; they are not trade instructions. Discord receives o
 
 ### History, replay, and operations
 
-Preserve signals, events, reports, failures, notification attempts, and provenance across restarts. Recorded market, news, duplicate-event, interrupted-data, and failure scenarios must replay through the same core flow used by live operation. Structured logs and basic status information must make health visible.
+Preserve signals, events, reports, failures, notification attempts, and provenance across restarts. Recorded market, news, duplicate-event, interrupted-data, and failure scenarios must replay through the same core flow used by live operation. Structured logs and basic status information must make health visible. Default logs stay quiet JSON at `INFO`. An optional heartbeat can say the process is still watching when the tape is silent. A separate optional watch log can narrate a run end to end for debugging. Neither is required for normal use.
 
 ## Constraints and limitations
 
