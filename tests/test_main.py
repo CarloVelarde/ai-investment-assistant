@@ -1,6 +1,6 @@
 """Tests for offline vs live application startup. No network."""
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -13,7 +13,11 @@ from investment_assistant.alpaca import AlpacaMarketData, HistoryHttpResponse
 from investment_assistant.clock import SteppingClock
 from investment_assistant.config import Settings
 from investment_assistant.main import build_live_provider, main
-from investment_assistant.market_data import FakeMarketData, MarketSession
+from investment_assistant.market_data import (
+    FakeMarketData,
+    MarketSession,
+    StreamMinute,
+)
 from investment_assistant.models import MarketBar, MarketTimeframe
 from investment_assistant.stock_stream import (
     STOCK_STREAM_PREFIX,
@@ -77,6 +81,32 @@ def test_main_stays_on_the_offline_fixture_path_without_keys(
     assert result is None
     assert len(calls) == 1
     assert calls[0].name == "abrupt_drop.json"
+
+
+def test_main_stops_quietly_on_keyboard_interrupt(tmp_path: Path) -> None:
+    class InterruptingProvider(FakeMarketData):
+        def iter_stream_minutes(self) -> Iterator[StreamMinute]:
+            raise KeyboardInterrupt
+            yield from ()
+
+    settings = Settings(
+        alpaca_api_key_id="test-key-id",
+        alpaca_api_secret_key=SecretStr(SECRET),
+        watchlist="TSLA",
+        database_path=tmp_path / "interrupt.sqlite3",
+    )
+    provider = InterruptingProvider(history=(_daily(),), session=CLOSED_SESSION)
+
+    result = main(
+        settings=settings,
+        provider=provider,
+        clock=SteppingClock(CLOSED_AT),
+        loop=True,
+        sleeper=lambda _seconds: None,
+        notifier=lambda *_: None,
+    )
+
+    assert result is None
 
 
 def test_main_runs_a_live_cycle_when_keys_are_present(tmp_path: Path) -> None:

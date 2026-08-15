@@ -102,16 +102,23 @@ def main(
     live_clock = clock or SystemClock()
     live_provider = provider or build_live_provider(settings, live_clock)
     poll = time.sleep if sleeper is None else sleeper
-    return run_live_session(
-        settings,
-        provider=live_provider,
-        clock=live_clock,
-        loop=loop,
-        max_cycles=max_cycles,
-        sleeper=poll,
-        researcher=researcher,
-        notifier=notifier,
-    )
+    try:
+        return run_live_session(
+            settings,
+            provider=live_provider,
+            clock=live_clock,
+            loop=loop,
+            max_cycles=max_cycles,
+            sleeper=poll,
+            researcher=researcher,
+            notifier=notifier,
+        )
+    except KeyboardInterrupt:
+        logger.info("Stopped")
+        closer = getattr(live_provider, "close_stock_stream", None)
+        if callable(closer):
+            closer()
+        return None
 
 
 def run_offline_console(settings: Settings) -> None:
