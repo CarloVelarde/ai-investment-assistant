@@ -2,7 +2,7 @@
 
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Literal, Protocol
@@ -11,8 +11,13 @@ from zoneinfo import ZoneInfo
 from investment_assistant.models import MarketBar, MarketTimeframe
 
 EASTERN = ZoneInfo("America/New_York")
+REGULAR_SESSION_OPEN = time(9, 30)
 REGULAR_SESSION_CLOSE = time(16, 0)
 ALPACA_PROVIDER = "alpaca"
+DAILY_BACKFILL_TRADING_DAYS = 21
+# Weekdays stand in for trading days; extra days cover holidays without a calendar.
+DAILY_BACKFILL_WEEKDAY_LOOKBACK = 30
+MAX_HISTORY_PAGES = 1000
 AlpacaFeed = Literal["iex", "sip"]
 
 
@@ -25,6 +30,10 @@ class StreamEventKind(StrEnum):
 
 class MarketDataError(Exception):
     """A market-data provider failure."""
+
+
+class MarketDataPermissionError(MarketDataError):
+    """The configured feed is not permitted for this account."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,12 +169,106 @@ class FakeMarketData:
         yield from tuple(self._stream)
 
 
+def regular_session_open(when: datetime) -> datetime:
+    """Return 09:30 America/New_York on the local date of ``when``."""
+
+    local_date = _aware_utc(when, "when").astimezone(EASTERN).date()
+    open_local = datetime.combine(local_date, REGULAR_SESSION_OPEN, tzinfo=EASTERN)
+    return open_local.astimezone(UTC)
+
+
 def regular_session_close(when: datetime) -> datetime:
     """Return 16:00 America/New_York on the local date of ``when``."""
 
     local_date = _aware_utc(when, "when").astimezone(EASTERN).date()
     close_local = datetime.combine(local_date, REGULAR_SESSION_CLOSE, tzinfo=EASTERN)
     return close_local.astimezone(UTC)
+
+
+def live_cutoff(now: datetime) -> datetime:
+    """Return today's regular open: older bars quiet-replay, later bars can emit."""
+
+    return regular_session_open(now)
+
+
+def is_regular_session_minute(start_at: datetime) -> bool:
+    """Return True when a minute bar starts in the 09:30–16:00 ET session."""
+
+    local_time = _aware_utc(start_at, "start_at").astimezone(EASTERN).time()
+    return REGULAR_SESSION_OPEN <= local_time < REGULAR_SESSION_CLOSE
+
+
+def daily_backfill_start(
+    now: datetime,
+    *,
+    trading_days: int = DAILY_BACKFILL_WEEKDAY_LOOKBACK,
+) -> datetime:
+    """Return midnight ET the given number of weekdays before ``now``.
+
+    This is a weekday stand-in for trading days, padded above 21 so a holiday
+    week still leaves enough completed ``1Day`` bars for the twenty-day rule.
+    """
+
+    if trading_days < 1:
+        raise ValueError("trading_days must be at least 1")
+    cursor = _aware_utc(now, "now").astimezone(EASTERN).date()
+    remaining = trading_days
+    while remaining > 0:
+        cursor -= timedelta(days=1)
+        if cursor.weekday() < 5:
+            remaining -= 1
+    return datetime.combine(cursor, time.min, tzinfo=EASTERN).astimezone(UTC)
+
+
+def minute_backfill_range(now: datetime) -> tuple[datetime, datetime]:
+    """Return the current regular session, or the previous weekday session."""
+
+    now_utc = _aware_utc(now, "now")
+    open_today = regular_session_open(now_utc)
+    close_today = regular_session_close(now_utc)
+    local = now_utc.astimezone(EASTERN)
+    if open_today <= now_utc <= close_today:
+        return open_today, now_utc
+    if now_utc > close_today and local.weekday() < 5:
+        return open_today, close_today
+    session_day = _previous_weekday(local.date())
+    start = datetime.combine(session_day, REGULAR_SESSION_OPEN, tzinfo=EASTERN)
+    end = datetime.combine(session_day, REGULAR_SESSION_CLOSE, tzinfo=EASTERN)
+    return start.astimezone(UTC), end.astimezone(UTC)
+
+
+def fetch_all_history(
+    provider: MarketData,
+    *,
+    symbols: Sequence[str],
+    timeframe: MarketTimeframe,
+    start: datetime,
+    end: datetime,
+) -> tuple[MarketBar, ...]:
+    """Follow ``next_page_token`` until the provider has no more bars."""
+
+    bars: list[MarketBar] = []
+    page_token: str | None = None
+    for _ in range(MAX_HISTORY_PAGES):
+        page = provider.fetch_history(
+            symbols=symbols,
+            timeframe=timeframe,
+            start=start,
+            end=end,
+            page_token=page_token,
+        )
+        bars.extend(page.bars)
+        if page.next_page_token is None:
+            return tuple(bars)
+        page_token = page.next_page_token
+    raise MarketDataError("history pagination exceeded the page limit")
+
+
+def _previous_weekday(day: date) -> date:
+    cursor = day - timedelta(days=1)
+    while cursor.weekday() >= 5:
+        cursor -= timedelta(days=1)
+    return cursor
 
 
 def market_bar_from_alpaca(

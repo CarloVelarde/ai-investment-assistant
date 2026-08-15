@@ -204,8 +204,14 @@ def process_market_bar(
     bar: MarketBar,
     watchlist: frozenset[str],
     now: datetime,
+    emit_signals: bool = True,
 ) -> MarketBarProcessingResult:
-    """Atomically save one bar and commit every resulting state transition."""
+    """Atomically save one bar and commit every resulting state transition.
+
+    When ``emit_signals`` is false, detector state still updates but signals
+    are not sent to the event manager and episodes are not closed. Used for
+    quiet replay of old backfill.
+    """
 
     diagnostics: list[str] = []
     accepted_signal_ids: list[str] = []
@@ -244,10 +250,11 @@ def process_market_bar(
             else:
                 continue
             diagnostics.extend(result.diagnostics)
-            for signal in result.signals:
-                if manager.handle_signal(signal).accepted:
-                    accepted_signal_ids.append(signal.signal_id)
-            if bar.timeframe is MarketTimeframe.ONE_DAY:
+            if emit_signals:
+                for signal in result.signals:
+                    if manager.handle_signal(signal).accepted:
+                        accepted_signal_ids.append(signal.signal_id)
+            if emit_signals and bar.timeframe is MarketTimeframe.ONE_DAY:
                 closed = maintain_market_episodes(storage, ticker, now=now)
                 closed_event_ids.extend(event.event_id for event in closed)
     return MarketBarProcessingResult(

@@ -164,6 +164,7 @@ Milestone 4 connects live prices without changing Milestone 3 detectors:
 - Streaming `dailyBars` are not completed days. Daily evaluation uses REST `1Day` bars after the regular close.
 - Fast evaluation uses regular-session minutes only (09:30–16:00 ET).
 - Startup backfill quiet-replays older bars into detector state and emits only from today’s regular open onward.
+- A market `signal_id` includes importance so a same-minute `updatedBars` revision can escalate. Same bar and same importance is still a duplicate.
 - Live news stays Milestone 5. The same keys will be reused; this milestone does not open the news socket.
 
 **Why:** The live source should be replaceable and safe on the free plan. Detectors stay local and testable.

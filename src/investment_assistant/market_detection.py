@@ -527,6 +527,7 @@ def _market_signal(
             window.value,
             direction.value,
             bar.start_at.isoformat(),
+            importance.value,  # lets a same-minute revision escalate
         ),
         ticker=bar.ticker,
         occurred_at=bar.end_at,
@@ -606,6 +607,7 @@ def _key_already_evaluated(
     state: DetectorState | None,
     evaluated_at: datetime,
 ) -> bool:
+    # Strict > keeps same-start re-evaluation open for updatedBars and delayed SPY.
     return (
         state is not None
         and state.last_evaluated_at is not None
