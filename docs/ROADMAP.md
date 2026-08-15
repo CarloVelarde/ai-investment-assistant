@@ -4,7 +4,7 @@
 
 ## Current focus
 
-**Milestone 4 — Live market data** is active. The feature spec is approved; implementation may proceed from the task list.
+**Milestone 4 — Live market data** task list is complete. REST history, quiet replay, after-close daily, and gap fill are wired. The live stock websocket is not opened yet. Milestone 5 may start when you want live news.
 
 ## Milestones
 
@@ -53,11 +53,13 @@ Explicit thresholds, severity levels, crossing, rearm, and episode-closing rules
 
 ### Milestone 4 — Live market data
 
-**Status:** Spec approved — implementation not started
+**Status:** Complete
 
 **Spec:** [`specs/004-live-market-data/`](../specs/004-live-market-data/SPEC.md)
 
 Add Alpaca market history and streaming behind the existing input boundary. Add stream health, reconnection, stale-data detection, missing-bar backfill, and invocation of the fast and daily detectors without changing their core rules.
+
+**Completed:** Settings, normalization, the market-data port, REST backfill, quiet replay, stream ingest, after-close daily, reconnect/gap fill, and stale-stream rules are in place. `main` uses the live path when keys exist and the offline fixture path when they do not. Production REST and the trading clock use stdlib HTTP; the stock websocket client is not opened yet, so daytime minutes arrive through REST recovery or an injected stream.
 
 **Complete when:** a small watchlist reliably feeds normalized live and recovered bars through both market evaluation modes during regular market operation.
 

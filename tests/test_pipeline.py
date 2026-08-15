@@ -274,8 +274,12 @@ def test_console_entrypoint_replay_uses_configured_database_without_duplicates(
 ) -> None:
     database_path = tmp_path / "console.sqlite3"
     get_settings.cache_clear()
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("INVESTMENT_ASSISTANT_LOG_JSON", "false")
     monkeypatch.setenv("INVESTMENT_ASSISTANT_DATABASE_PATH", str(database_path))
+    monkeypatch.delenv("INVESTMENT_ASSISTANT_ALPACA_API_KEY_ID", raising=False)
+    monkeypatch.delenv("INVESTMENT_ASSISTANT_ALPACA_API_SECRET_KEY", raising=False)
+    monkeypatch.delenv("INVESTMENT_ASSISTANT_WATCHLIST", raising=False)
     try:
         main()
         main()

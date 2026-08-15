@@ -1,8 +1,9 @@
-"""Guardrails that Milestone 3 stayed local, offline, and single-process."""
+"""Guardrails that Milestone 4 stayed single-process and added no extra services."""
 
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
+SOURCE = ROOT / "src" / "investment_assistant"
 
 
 def test_runtime_dependencies_do_not_add_live_or_distributed_services() -> None:
@@ -24,10 +25,19 @@ def test_runtime_dependencies_do_not_add_live_or_distributed_services() -> None:
 
 
 def test_source_tree_has_no_worker_orm_or_weekly_scheduler() -> None:
-    source = ROOT / "src" / "investment_assistant"
-    text = "\n".join(path.read_text(encoding="utf-8") for path in source.rglob("*.py"))
+    text = "\n".join(path.read_text(encoding="utf-8") for path in SOURCE.rglob("*.py"))
     banned_tokens = ("Celery", "SQLAlchemy", "Redis", "Kafka", "APScheduler")
 
     assert "sqlite3" in text
     for token in banned_tokens:
         assert token not in text
+
+
+def test_live_mode_adds_no_news_client_discord_or_weekly_job() -> None:
+    text = "\n".join(path.read_text(encoding="utf-8") for path in SOURCE.rglob("*.py"))
+
+    assert "v1beta1/news" not in text
+    assert "discord" not in text.lower()
+    assert "weekly" not in text.lower()
+    assert "brokerage" not in text.lower()
+    assert "place_order" not in text

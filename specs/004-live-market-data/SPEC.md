@@ -139,16 +139,16 @@ There is still no weekly job and no user cadence setting.
 
 ## Acceptance criteria
 
-- [ ] AC-01: Live settings load key id, secret, feed, trading URL, and watchlist from the environment. Missing keys keep the offline console path. Secrets never appear in logs or fixtures.
-- [ ] AC-02: An Alpaca-shaped bar (REST or stream JSON) becomes a valid `MarketBar` with provider `alpaca`, the configured feed, UTC times, and complete-bar identity. SDK types do not leak past the adapter.
-- [ ] AC-03: Startup backfill saves at least 21 trading days of `1Day` bars and the needed `1Min` session bars. Repeating the same bar identity does not duplicate rows.
-- [ ] AC-04: Quiet replay updates detector state for old bars without creating research. A qualifying move at or after the live cutoff still emits through the event manager.
-- [ ] AC-05: A completed regular-session stream minute is persisted and runs the fast detector. A same-severity continuation stays quiet. An `updatedBars` revision replaces that minute and re-evaluates without duplicate research unless importance escalates.
-- [ ] AC-06: After regular close, completed `1Day` bars run the daily detector (including relative-to-`SPY` when `SPY` is present). Streaming `dailyBars` do not trigger daily evaluation.
-- [ ] AC-07: After a simulated disconnect, reconnect plus REST backfill fills the gap. Already handled crossings do not research again.
-- [ ] AC-08: A stale stream during regular hours is diagnosed. A single missing IEX minute on an illiquid name is not treated as a dead stream.
-- [ ] AC-09: Watchlist plus `SPY` longer than 30 symbols is rejected. Extended-hours minute bars do not run the fast detector.
-- [ ] AC-10: Live mode adds no news client, Discord, workers, ORM, or weekly process. Tests use fakes and no network. Ruff, mypy, and pytest pass.
+- [x] AC-01: Live settings load key id, secret, feed, trading URL, and watchlist from the environment. Missing keys keep the offline console path. Secrets never appear in logs or fixtures.
+- [x] AC-02: An Alpaca-shaped bar (REST or stream JSON) becomes a valid `MarketBar` with provider `alpaca`, the configured feed, UTC times, and complete-bar identity. SDK types do not leak past the adapter.
+- [x] AC-03: Startup backfill saves at least 21 trading days of `1Day` bars and the needed `1Min` session bars. Repeating the same bar identity does not duplicate rows.
+- [x] AC-04: Quiet replay updates detector state for old bars without creating research. A qualifying move at or after the live cutoff still emits through the event manager.
+- [x] AC-05: A completed regular-session stream minute is persisted and runs the fast detector. A same-severity continuation stays quiet. An `updatedBars` revision replaces that minute and re-evaluates without duplicate research unless importance escalates.
+- [x] AC-06: After regular close, completed `1Day` bars run the daily detector (including relative-to-`SPY` when `SPY` is present). Streaming `dailyBars` do not trigger daily evaluation.
+- [x] AC-07: After a simulated disconnect, reconnect plus REST backfill fills the gap. Already handled crossings do not research again.
+- [x] AC-08: A stale stream during regular hours is diagnosed. A single missing IEX minute on an illiquid name is not treated as a dead stream.
+- [x] AC-09: Watchlist plus `SPY` longer than 30 symbols is rejected. Extended-hours minute bars do not run the fast detector.
+- [x] AC-10: Live mode adds no news client, Discord, workers, ORM, or weekly process. Tests use fakes and no network. Ruff, mypy, and pytest pass.
 
 ## Constraints
 
