@@ -112,6 +112,8 @@ class FakeMarketData:
         self._stream = list(stream)
         self._session = session
         self._page_size = page_size
+        self._connected = True
+        self.resubscribe_count = 0
 
     def add_history(self, *bars: MarketBar) -> None:
         """Append normalized bars to the fake history store."""
@@ -127,6 +129,17 @@ class FakeMarketData:
         """Replace the fake regular-session clock."""
 
         self._session = session
+
+    def disconnect(self) -> None:
+        """Stop yielding stream minutes until resubscribe."""
+
+        self._connected = False
+
+    def resubscribe(self) -> None:
+        """Mark the fake stream connected again after a disconnect."""
+
+        self._connected = True
+        self.resubscribe_count += 1
 
     def fetch_history(
         self,
@@ -166,7 +179,8 @@ class FakeMarketData:
     def iter_stream_minutes(self) -> Iterator[StreamMinute]:
         """Yield a snapshot of queued stream minutes."""
 
-        yield from tuple(self._stream)
+        if self._connected:
+            yield from tuple(self._stream)
 
 
 def regular_session_open(when: datetime) -> datetime:
@@ -218,6 +232,15 @@ def daily_backfill_start(
         if cursor.weekday() < 5:
             remaining -= 1
     return datetime.combine(cursor, time.min, tzinfo=EASTERN).astimezone(UTC)
+
+
+def last_closed_session_date(now: datetime) -> date:
+    """Return the regular-session date that most recently closed."""
+
+    local = _aware_utc(now, "now").astimezone(EASTERN)
+    if local.weekday() < 5 and local.time() >= REGULAR_SESSION_CLOSE:
+        return local.date()
+    return _previous_weekday(local.date())
 
 
 def minute_backfill_range(now: datetime) -> tuple[datetime, datetime]:

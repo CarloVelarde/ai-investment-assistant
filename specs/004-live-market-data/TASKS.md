@@ -12,9 +12,9 @@
 - [x] 4. Implement REST history fetch with pagination and safe 429 backoff behind the port. Test multi-symbol pages and a SIP-permission failure diagnostic.
 - [x] 5. Implement startup backfill into existing bar storage and quiet detector replay before the live cutoff. Test old bars update state but do not research; a cutoff-or-later qualifying bar can emit.
 - [x] 6. Implement the stock stream adapter for completed `bars` and `updatedBars`. Test regular-session filter, first crossing, quiet continuation, and revision replace/re-evaluate.
-- [ ] 7. After regular close (fake clock), fetch completed `1Day` bars and run the existing daily detector plus episode maintenance. Test that streaming-style running daily bars are not treated as complete.
-- [ ] 8. Implement disconnect → backoff → resubscribe → REST gap fill. Test the gap is filled and a crossing already in detector state does not research again.
-- [ ] 9. Implement stale-stream rules (socket silence vs one missing illiquid minute). Test diagnostics and that a single skipped IEX minute is not fatal.
+- [x] 7. After regular close (fake clock), fetch completed `1Day` bars and run the existing daily detector plus episode maintenance. Test that streaming-style running daily bars are not treated as complete.
+- [x] 8. Implement disconnect → backoff → resubscribe → REST gap fill. Test the gap is filled and a crossing already in detector state does not research again.
+- [x] 9. Implement stale-stream rules (socket silence vs one missing illiquid minute). Test diagnostics and that a single skipped IEX minute is not fatal.
 - [ ] 10. Wire `main`: live loop when keys exist, existing abrupt-drop fixture path when they do not. Add `.env.example`. Keep one process.
 - [ ] 11. Confirm no news client, Discord, workers, ORM, or weekly cadence were added; update `docs/DECISIONS.md` only if a durable choice changed; run all repository checks.
 

@@ -1,25 +1,37 @@
 """Startup backfill, quiet replay, and live minute ingest."""
 
-from collections.abc import Mapping, Sequence
+import logging
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, time, timedelta
 
 from investment_assistant.clock import Clock
 from investment_assistant.event_manager import EventManager
 from investment_assistant.market_data import (
+    EASTERN,
     AlpacaFeed,
     MarketData,
+    MarketSession,
     StreamMinute,
     daily_backfill_start,
     fetch_all_history,
     is_regular_session_minute,
+    last_closed_session_date,
     live_cutoff,
     minute_backfill_range,
+    regular_session_close,
+    regular_session_open,
     stream_minute_from_alpaca,
 )
 from investment_assistant.models import MarketBar, MarketTimeframe
 from investment_assistant.pipeline import MarketBarProcessingResult, process_market_bar
 from investment_assistant.storage import SQLiteStorage
+
+logger = logging.getLogger(__name__)
+
+STREAM_SILENCE = timedelta(seconds=120)
+SPY_STALE = timedelta(minutes=5)
+MAX_RECONNECT_BACKOFF = 32.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +42,37 @@ class LiveIngestResult:
     diagnostics: tuple[str, ...] = ()
     closed_event_ids: tuple[str, ...] = ()
     persisted_bar_ids: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
+class StreamHealth:
+    """In-memory last-seen times for stale-stream checks."""
+
+    started_at: datetime
+    last_message_at: datetime | None = None
+    last_spy_regular_end_at: datetime | None = None
+
+    def record(self, event: StreamMinute, *, now: datetime) -> None:
+        """Remember a websocket minute for silence and SPY freshness."""
+
+        self.last_message_at = now
+        if event.bar.ticker == "SPY" and is_regular_session_minute(event.bar.start_at):
+            self.last_spy_regular_end_at = event.bar.end_at
+
+
+@dataclass(frozen=True, slots=True)
+class StaleStreamStatus:
+    """Whether the live stock stream looks silent or SPY-stale."""
+
+    diagnostics: tuple[str, ...]
+    socket_silent: bool
+    spy_stale: bool
+
+    @property
+    def is_stale(self) -> bool:
+        """Return True when a reconnect or gap fill should run."""
+
+        return self.socket_silent or self.spy_stale
 
 
 def backfill_and_replay(
@@ -167,6 +210,220 @@ def ingest_stream_minutes(
         closed_event_ids=tuple(closed),
         persisted_bar_ids=tuple(persisted),
     )
+
+
+def run_after_close_daily(
+    *,
+    storage: SQLiteStorage,
+    manager: EventManager,
+    provider: MarketData,
+    watchlist: Sequence[str],
+    clock: Clock,
+) -> LiveIngestResult:
+    """Fetch completed REST ``1Day`` bars after regular close and evaluate them."""
+
+    session = provider.get_session()
+    if session.is_open:
+        return LiveIngestResult(diagnostics=("regular session still open",))
+    now = clock.now()
+    symbols = _watched_symbols(watchlist)
+    session_day = last_closed_session_date(now)
+    start = datetime.combine(session_day, time.min, tzinfo=EASTERN).astimezone(UTC)
+    bars = fetch_all_history(
+        provider,
+        symbols=symbols,
+        timeframe=MarketTimeframe.ONE_DAY,
+        start=start,
+        end=now,
+    )
+    logger.info(
+        "After-close daily fetch",
+        extra={"session_day": session_day.isoformat(), "bars": len(bars)},
+    )
+    return _replay_bars(
+        storage=storage,
+        manager=manager,
+        bars=bars,
+        watchlist=frozenset(symbols),
+        clock=clock,
+        cutoff=live_cutoff(now),
+    )
+
+
+def fill_minute_gap(
+    *,
+    storage: SQLiteStorage,
+    manager: EventManager,
+    provider: MarketData,
+    watchlist: Sequence[str],
+    clock: Clock,
+) -> LiveIngestResult:
+    """REST-fill missing regular-session minutes from last persisted bar to now."""
+
+    now = clock.now()
+    symbols = _watched_symbols(watchlist)
+    start = _minute_gap_start(storage, symbols, now)
+    bars = fetch_all_history(
+        provider,
+        symbols=symbols,
+        timeframe=MarketTimeframe.ONE_MINUTE,
+        start=start,
+        end=now,
+    )
+    logger.info(
+        "Minute gap fill",
+        extra={"start": start.isoformat(), "bars": len(bars)},
+    )
+    return _replay_bars(
+        storage=storage,
+        manager=manager,
+        bars=bars,
+        watchlist=frozenset(symbols),
+        clock=clock,
+        cutoff=live_cutoff(now),
+    )
+
+
+def reconnect_stream(
+    *,
+    storage: SQLiteStorage,
+    manager: EventManager,
+    provider: MarketData,
+    watchlist: Sequence[str],
+    clock: Clock,
+    sleeper: Callable[[float], None],
+    attempt: int = 0,
+) -> LiveIngestResult:
+    """Back off, resubscribe, then REST-fill the disconnect gap."""
+
+    delay = min(2.0**attempt, MAX_RECONNECT_BACKOFF)
+    logger.warning(
+        "Stock stream reconnecting",
+        extra={"attempt": attempt + 1, "delay_seconds": delay},
+    )
+    sleeper(delay)
+    _resubscribe(provider)
+    gap = fill_minute_gap(
+        storage=storage,
+        manager=manager,
+        provider=provider,
+        watchlist=watchlist,
+        clock=clock,
+    )
+    return LiveIngestResult(
+        accepted_signal_ids=gap.accepted_signal_ids,
+        diagnostics=("reconnected stock stream", *gap.diagnostics),
+        closed_event_ids=gap.closed_event_ids,
+        persisted_bar_ids=gap.persisted_bar_ids,
+    )
+
+
+def diagnose_stream_health(
+    health: StreamHealth,
+    *,
+    now: datetime,
+    session: MarketSession,
+) -> StaleStreamStatus:
+    """Detect socket silence or a stale SPY minute during regular hours."""
+
+    if not session.is_open or not _during_regular_hours(now):
+        return StaleStreamStatus((), False, False)
+    socket_silent = (
+        now - (health.last_message_at or health.started_at)
+    ) >= STREAM_SILENCE
+    spy_stale = (
+        now - (health.last_spy_regular_end_at or health.started_at)
+    ) >= SPY_STALE
+    diagnostics: list[str] = []
+    if socket_silent:
+        diagnostics.append("stale stream: no websocket data for 120 seconds")
+    if spy_stale:
+        diagnostics.append(
+            "stale stream: SPY has no new regular-session minute for 5 minutes"
+        )
+    return StaleStreamStatus(tuple(diagnostics), socket_silent, spy_stale)
+
+
+def recover_stale_stream(
+    *,
+    storage: SQLiteStorage,
+    manager: EventManager,
+    provider: MarketData,
+    watchlist: Sequence[str],
+    clock: Clock,
+    health: StreamHealth,
+    sleeper: Callable[[float], None],
+) -> LiveIngestResult:
+    """Backfill a stale gap; reconnect only when the socket itself looks dead."""
+
+    status = diagnose_stream_health(
+        health,
+        now=clock.now(),
+        session=provider.get_session(),
+    )
+    if not status.is_stale:
+        return LiveIngestResult()
+    logger.warning(
+        "Stale stock stream",
+        extra={"diagnostics": list(status.diagnostics)},
+    )
+    if status.socket_silent:
+        return reconnect_stream(
+            storage=storage,
+            manager=manager,
+            provider=provider,
+            watchlist=watchlist,
+            clock=clock,
+            sleeper=sleeper,
+        )
+    gap = fill_minute_gap(
+        storage=storage,
+        manager=manager,
+        provider=provider,
+        watchlist=watchlist,
+        clock=clock,
+    )
+    return LiveIngestResult(
+        accepted_signal_ids=gap.accepted_signal_ids,
+        diagnostics=(*status.diagnostics, *gap.diagnostics),
+        closed_event_ids=gap.closed_event_ids,
+        persisted_bar_ids=gap.persisted_bar_ids,
+    )
+
+
+def _watched_symbols(watchlist: Sequence[str]) -> tuple[str, ...]:
+    return tuple(ticker.strip().upper() for ticker in watchlist if ticker.strip())
+
+
+def _during_regular_hours(now: datetime) -> bool:
+    return regular_session_open(now) <= now <= regular_session_close(now)
+
+
+def _resubscribe(provider: MarketData) -> None:
+    resubscribe = getattr(provider, "resubscribe", None)
+    if callable(resubscribe):
+        resubscribe()
+
+
+def _minute_gap_start(
+    storage: SQLiteStorage,
+    symbols: Sequence[str],
+    now: datetime,
+) -> datetime:
+    ends: list[datetime] = []
+    for symbol in symbols:
+        bars = storage.list_market_bars(
+            symbol,
+            MarketTimeframe.ONE_MINUTE,
+            complete_only=True,
+            limit=1,
+        )
+        if bars:
+            ends.append(bars[-1].end_at)
+    if ends:
+        return min(ends)
+    session_start, _ = minute_backfill_range(now)
+    return session_start
 
 
 def _replay_bars(
