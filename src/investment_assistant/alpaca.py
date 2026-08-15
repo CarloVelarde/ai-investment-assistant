@@ -1,10 +1,14 @@
 """Alpaca REST adapter behind the market-data port. No live network in tests."""
 
+import json
 import logging
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from investment_assistant.clock import Clock
 from investment_assistant.market_data import (
@@ -15,6 +19,7 @@ from investment_assistant.market_data import (
     MarketSession,
     StreamMinute,
     market_bar_from_alpaca,
+    parse_alpaca_timestamp,
 )
 from investment_assistant.models import MarketBar, MarketTimeframe
 
@@ -57,6 +62,7 @@ class AlpacaMarketData:
         feed: AlpacaFeed = "iex",
         sleeper: Callable[[float], None],
         session: MarketSession | None = None,
+        session_provider: Callable[[], MarketSession] | None = None,
         stream: Sequence[StreamMinute] = (),
     ) -> None:
         self._http = http
@@ -64,6 +70,7 @@ class AlpacaMarketData:
         self._feed = feed
         self._sleeper = sleeper
         self._session = session
+        self._session_provider = session_provider
         self._stream = tuple(stream)
 
     def fetch_history(
@@ -113,8 +120,10 @@ class AlpacaMarketData:
         )
 
     def get_session(self) -> MarketSession:
-        """Return an injected session until the trading-clock client lands."""
+        """Return the live clock session, or an injected test session."""
 
+        if self._session_provider is not None:
+            return self._session_provider()
         if self._session is None:
             raise MarketDataError("market session is not available")
         return self._session
@@ -222,3 +231,88 @@ def _rfc3339(value: datetime) -> str:
     if value.utcoffset() is None:
         raise ValueError("history start and end must be timezone-aware")
     return value.isoformat().replace("+00:00", "Z")
+
+
+DATA_API_URL = "https://data.alpaca.markets"
+REQUEST_TIMEOUT_SECONDS = 30
+
+
+class UrllibHistoryHttp:
+    """GET Alpaca stock bars with the standard library. Unused in pytest."""
+
+    def __init__(
+        self,
+        *,
+        key_id: str,
+        secret: str,
+        base_url: str = DATA_API_URL,
+    ) -> None:
+        self._key_id = key_id
+        self._secret = secret
+        self._base_url = base_url.rstrip("/")
+
+    def get_stock_bars(self, params: Mapping[str, str]) -> HistoryHttpResponse:
+        """GET /v2/stocks/bars and return status, JSON body, and headers."""
+
+        url = f"{self._base_url}/v2/stocks/bars?{urlencode(params)}"
+        return _http_get(url, key_id=self._key_id, secret=self._secret)
+
+
+def fetch_alpaca_session(
+    trading_url: str,
+    *,
+    key_id: str,
+    secret: str,
+) -> MarketSession:
+    """Load the trading-clock session. Not used by pytest."""
+
+    url = f"{trading_url.rstrip('/')}/v2/clock"
+    response = _http_get(url, key_id=key_id, secret=secret)
+    if response.status_code != 200:
+        raise MarketDataError(
+            f"Alpaca clock request failed with status {response.status_code}"
+        )
+    return MarketSession(
+        is_open=bool(response.body.get("is_open")),
+        timestamp=parse_alpaca_timestamp(response.body.get("timestamp")),
+        next_open=parse_alpaca_timestamp(response.body.get("next_open")),
+        next_close=parse_alpaca_timestamp(response.body.get("next_close")),
+    )
+
+
+def _http_get(url: str, *, key_id: str, secret: str) -> HistoryHttpResponse:
+    request = Request(
+        url,
+        headers={
+            "APCA-API-KEY-ID": key_id,
+            "APCA-API-SECRET-KEY": secret,
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            payload = response.read().decode("utf-8")
+            parsed = json.loads(payload) if payload else {}
+            if not isinstance(parsed, dict):
+                raise MarketDataError("Alpaca response must be a JSON object")
+            return HistoryHttpResponse(
+                status_code=int(response.status),
+                body=parsed,
+                headers={key: str(value) for key, value in response.headers.items()},
+            )
+    except HTTPError as error:
+        raw = error.read().decode("utf-8")
+        try:
+            parsed_error = json.loads(raw) if raw else {}
+            body = parsed_error if isinstance(parsed_error, dict) else {}
+        except json.JSONDecodeError:
+            body = {}
+        return HistoryHttpResponse(
+            status_code=int(error.code),
+            body=body,
+            headers={key: str(value) for key, value in error.headers.items()},
+        )
+    except URLError as error:
+        raise MarketDataError("Alpaca request failed") from error
+    except json.JSONDecodeError as error:
+        raise MarketDataError("Alpaca response was not valid JSON") from error

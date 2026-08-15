@@ -15,7 +15,7 @@
 - [x] 7. After regular close (fake clock), fetch completed `1Day` bars and run the existing daily detector plus episode maintenance. Test that streaming-style running daily bars are not treated as complete.
 - [x] 8. Implement disconnect → backoff → resubscribe → REST gap fill. Test the gap is filled and a crossing already in detector state does not research again.
 - [x] 9. Implement stale-stream rules (socket silence vs one missing illiquid minute). Test diagnostics and that a single skipped IEX minute is not fatal.
-- [ ] 10. Wire `main`: live loop when keys exist, existing abrupt-drop fixture path when they do not. Add `.env.example`. Keep one process.
+- [x] 10. Wire `main`: live loop when keys exist, existing abrupt-drop fixture path when they do not. Add `.env.example`. Keep one process.
 - [ ] 11. Confirm no news client, Discord, workers, ORM, or weekly cadence were added; update `docs/DECISIONS.md` only if a durable choice changed; run all repository checks.
 
 ## Acceptance coverage

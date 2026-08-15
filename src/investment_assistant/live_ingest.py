@@ -183,6 +183,7 @@ def ingest_stream_minutes(
     provider: MarketData,
     watchlist: Sequence[str],
     clock: Clock,
+    health: StreamHealth | None = None,
 ) -> LiveIngestResult:
     """Ingest every queued stream minute from the market-data port."""
 
@@ -193,6 +194,8 @@ def ingest_stream_minutes(
     watched = tuple(watchlist)
     for event in provider.iter_stream_minutes():
         _sync_clock(clock, event.bar.end_at)
+        if health is not None:
+            health.record(event, now=clock.now())
         outcome = ingest_stream_minute(
             storage=storage,
             manager=manager,

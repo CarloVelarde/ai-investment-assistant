@@ -31,6 +31,15 @@ class FixedClock:
         return self.current_time
 
 
+class SystemClock:
+    """Read the real UTC clock. Production live mode uses this."""
+
+    def now(self) -> datetime:
+        """Return the current UTC time."""
+
+        return datetime.now(UTC)
+
+
 class SteppingClock:
     """A mutable clock tests and offline replay can advance explicitly."""
 
