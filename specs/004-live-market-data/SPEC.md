@@ -1,6 +1,6 @@
 # Feature Specification: Live Market Data
 
-**Document status:** Approved — remaining slice: live stock websocket
+**Document status:** Approved
 
 ## Purpose
 
@@ -107,7 +107,7 @@ Reject incomplete or invalid bars the same way Milestone 3 already does. SDK obj
 4. Persist bars idempotently by existing bar identity.
 5. **Quiet replay:** walk backfilled bars in time order and update detector state **without** sending signals to the event manager when the bar ended before the live cutoff.
 6. **Live cutoff:** the start of today’s regular session. If the app starts after close, today’s completed daily bar is eligible to emit.
-7. **Open one stock websocket** to `wss://stream.data.alpaca.markets/v2/{feed}`, authenticate with the same keys, subscribe the watchlist (including `SPY`) to `bars` and `updatedBars` only, and process each completed minute through the existing ingest path (save → detect → handle_signal). This step is the remaining implementation. A fake or empty iterator is not enough for live mode.
+7. **Open one stock websocket** to `wss://stream.data.alpaca.markets/v2/{feed}`, authenticate with the same keys, subscribe the watchlist (including `SPY`) to `bars` and `updatedBars` only, and process each completed minute through the existing ingest path (save → detect → handle_signal). A fake or empty iterator is not enough for live mode.
 
 Quiet replay exists so a restart does not research last month’s already-settled crash, but today’s open stress can still surface.
 
@@ -151,8 +151,8 @@ There is still no weekly job and no user cadence setting.
 - [x] AC-08: A stale stream during regular hours is diagnosed. A single missing IEX minute on an illiquid name is not treated as a dead stream.
 - [x] AC-09: Watchlist plus `SPY` longer than 30 symbols is rejected. Extended-hours minute bars do not run the fast detector.
 - [x] AC-10: Live mode adds no news client, Discord, workers, ORM, or weekly process. Tests use fakes and no network. Ruff, mypy, and pytest pass.
-- [ ] AC-11: With live keys, `main` opens **one** stock websocket to `wss://stream.data.alpaca.markets/v2/{feed}`, authenticates, and subscribes the watchlist plus `SPY` to `bars` and `updatedBars` only. It does not open the news socket or a second stock connection. Failed auth is a safe diagnostic (no secret printed).
-- [ ] AC-12: Frames from that socket become `StreamMinute` values at the adapter and go through the existing ingest path. Tests inject a fake transport and never open a network socket. A qualifying regular-session minute can still emit; `dailyBars` still do not.
+- [x] AC-11: With live keys, `main` opens **one** stock websocket to `wss://stream.data.alpaca.markets/v2/{feed}`, authenticates, and subscribes the watchlist plus `SPY` to `bars` and `updatedBars` only. It does not open the news socket or a second stock connection. Failed auth is a safe diagnostic (no secret printed).
+- [x] AC-12: Frames from that socket become `StreamMinute` values at the adapter and go through the existing ingest path. Tests inject a fake transport and never open a network socket. A qualifying regular-session minute can still emit; `dailyBars` still do not.
 
 ## Constraints
 

@@ -37,6 +37,7 @@ def test_live_mode_adds_no_news_client_discord_or_weekly_job() -> None:
     text = "\n".join(path.read_text(encoding="utf-8") for path in SOURCE.rglob("*.py"))
 
     assert "v1beta1/news" not in text
+    assert "wss://stream.data.alpaca.markets/v2/" in text
     assert "discord" not in text.lower()
     assert "weekly" not in text.lower()
     assert "brokerage" not in text.lower()

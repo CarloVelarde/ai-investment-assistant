@@ -1,6 +1,6 @@
 # Implementation Plan: Live Market Data
 
-**Document status:** Approved — remaining slice: open the live stock websocket
+**Document status:** Approved
 
 ## Approach
 

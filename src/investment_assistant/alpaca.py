@@ -1,4 +1,4 @@
-"""Alpaca REST adapter behind the market-data port. No live network in tests."""
+"""Alpaca REST and stock-stream adapter behind the market-data port."""
 
 import json
 import logging
@@ -20,8 +20,18 @@ from investment_assistant.market_data import (
     StreamMinute,
     market_bar_from_alpaca,
     parse_alpaca_timestamp,
+    stream_minute_from_alpaca,
 )
 from investment_assistant.models import MarketBar, MarketTimeframe
+from investment_assistant.stock_stream import (
+    HANDSHAKE_TIMEOUT_SECONDS,
+    STREAM_RECV_TIMEOUT_SECONDS,
+    StockStreamAuthError,
+    StockStreamDisconnect,
+    StockStreamError,
+    StockStreamTransport,
+    normalized_stream_symbols,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +62,7 @@ class HistoryHttp(Protocol):
 
 
 class AlpacaMarketData:
-    """Normalize Alpaca REST history pages into ``MarketBar`` values."""
+    """Normalize Alpaca REST history and stock-stream frames."""
 
     def __init__(
         self,
@@ -63,7 +73,11 @@ class AlpacaMarketData:
         sleeper: Callable[[float], None],
         session: MarketSession | None = None,
         session_provider: Callable[[], MarketSession] | None = None,
-        stream: Sequence[StreamMinute] = (),
+        transport: StockStreamTransport | None = None,
+        key_id: str = "",
+        secret: str = "",
+        symbols: Sequence[str] = (),
+        recv_timeout: float = STREAM_RECV_TIMEOUT_SECONDS,
     ) -> None:
         self._http = http
         self._clock = clock
@@ -71,7 +85,13 @@ class AlpacaMarketData:
         self._sleeper = sleeper
         self._session = session
         self._session_provider = session_provider
-        self._stream = tuple(stream)
+        self._transport = transport
+        self._key_id = key_id
+        self._secret = secret
+        self._symbols = tuple(normalized_stream_symbols(symbols))
+        self._recv_timeout = recv_timeout
+        self._stream_open = False
+        self._needs_reconnect = False
 
     def fetch_history(
         self,
@@ -128,10 +148,94 @@ class AlpacaMarketData:
             raise MarketDataError("market session is not available")
         return self._session
 
-    def iter_stream_minutes(self) -> Iterator[StreamMinute]:
-        """Yield injected stream minutes until the websocket adapter lands."""
+    @property
+    def holds_stock_stream(self) -> bool:
+        """Return True when a stock-stream transport is configured."""
 
-        yield from self._stream
+        return self._transport is not None
+
+    @property
+    def stock_stream_url(self) -> str | None:
+        """Return the configured stock websocket URL, if the transport has one."""
+
+        return getattr(self._transport, "url", None)
+
+    @property
+    def stream_symbols(self) -> tuple[str, ...]:
+        """Return the symbols that will be subscribed on the stock stream."""
+
+        return self._symbols
+
+    @property
+    def needs_stream_reconnect(self) -> bool:
+        """Return True when the live socket dropped and should be reopened."""
+
+        return self._needs_reconnect
+
+    def open_stock_stream(self) -> None:
+        """Connect, authenticate, and subscribe. Safe to call while open."""
+
+        if self._transport is None or self._stream_open:
+            return
+        if not self._symbols:
+            raise MarketDataError("stock stream watchlist is empty")
+        transport = self._transport
+        transport.connect()
+        logger.info("Stock stream connected", extra={"feed": self._feed})
+        try:
+            self._complete_handshake(transport)
+        except Exception as error:
+            self.close_stock_stream()
+            if not isinstance(error, StockStreamAuthError):
+                self._needs_reconnect = True
+            raise
+        self._stream_open = True
+        self._needs_reconnect = False
+
+    def close_stock_stream(self) -> None:
+        """Close the stock websocket if a transport is configured."""
+
+        if self._transport is not None:
+            self._transport.close()
+        self._stream_open = False
+
+    def resubscribe(self) -> None:
+        """Close, then connect, auth, and subscribe again."""
+
+        self.close_stock_stream()
+        self._needs_reconnect = False
+        self.open_stock_stream()
+
+    def iter_stream_minutes(self) -> Iterator[StreamMinute]:
+        """Yield completed minutes from the stock stream until idle or drop."""
+
+        transport = self._transport
+        if transport is None:
+            return
+        try:
+            self.open_stock_stream()
+        except StockStreamAuthError:
+            raise
+        except StockStreamError:
+            self._needs_reconnect = True
+            return
+        while True:
+            try:
+                frames = transport.recv_frames(timeout=self._recv_timeout)
+            except StockStreamDisconnect:
+                self._stream_open = False
+                self._needs_reconnect = True
+                return
+            except StockStreamError:
+                self._stream_open = False
+                self._needs_reconnect = True
+                return
+            if not frames:
+                return
+            for payload in frames:
+                event = self._stream_minute_or_none(payload)
+                if event is not None:
+                    yield event
 
     def _get_with_retry(self, params: Mapping[str, str]) -> HistoryHttpResponse:
         last_error = "Alpaca history request rate limited"
@@ -148,6 +252,77 @@ class AlpacaMarketData:
             )
             self._sleeper(delay)
         raise MarketDataError(last_error)
+
+    def _complete_handshake(self, transport: StockStreamTransport) -> None:
+        self._expect_success(transport, "connected")
+        transport.authenticate(key_id=self._key_id, secret=self._secret)
+        self._expect_success(transport, "authenticated")
+        transport.subscribe(self._symbols)
+        self._expect_subscription(transport)
+
+    def _expect_success(self, transport: StockStreamTransport, message: str) -> None:
+        payload = self._recv_control(transport)
+        if payload.get("T") == "error":
+            self._raise_error_frame(payload)
+        if payload.get("T") != "success" or payload.get("msg") != message:
+            raise StockStreamError("unexpected stock stream handshake message")
+
+    def _expect_subscription(self, transport: StockStreamTransport) -> None:
+        payload = self._recv_control(transport)
+        if payload.get("T") == "error":
+            self._raise_error_frame(payload)
+        if payload.get("T") != "subscription":
+            raise StockStreamError("stock stream subscription was not confirmed")
+        logger.info(
+            "Stock stream subscribed",
+            extra={
+                "symbols": list(self._symbols),
+                "bars": payload.get("bars"),
+                "updated_bars": payload.get("updatedBars"),
+            },
+        )
+
+    def _recv_control(self, transport: StockStreamTransport) -> Mapping[str, object]:
+        try:
+            frames = transport.recv_frames(timeout=HANDSHAKE_TIMEOUT_SECONDS)
+        except StockStreamDisconnect:
+            self._needs_reconnect = True
+            raise
+        if not frames:
+            raise StockStreamError("stock stream handshake timed out")
+        return frames[0]
+
+    def _raise_error_frame(self, payload: Mapping[str, object]) -> None:
+        code = payload.get("code")
+        raw_message = payload.get("msg")
+        text = raw_message if isinstance(raw_message, str) else "stock stream error"
+        text = _without_secret(text, self._secret)
+        if code in (402, 404) or "auth" in text.lower():
+            raise StockStreamAuthError(
+                f"Alpaca stock stream authentication failed: {text}"
+            )
+        raise StockStreamError(f"Alpaca stock stream error: {text}")
+
+    def _stream_minute_or_none(
+        self, payload: Mapping[str, object]
+    ) -> StreamMinute | None:
+        message_type = payload.get("T")
+        if message_type == "d":
+            return None
+        if message_type not in {"b", "u"}:
+            return None
+        try:
+            return stream_minute_from_alpaca(
+                payload,
+                feed=self._feed,
+                retrieved_at=self._clock.now(),
+            )
+        except (TypeError, ValueError) as error:
+            logger.warning(
+                "Skipping invalid stock stream minute",
+                extra={"reason": _without_secret(str(error), self._secret)},
+            )
+            return None
 
 
 def _bars_from_response(
@@ -231,6 +406,12 @@ def _rfc3339(value: datetime) -> str:
     if value.utcoffset() is None:
         raise ValueError("history start and end must be timezone-aware")
     return value.isoformat().replace("+00:00", "Z")
+
+
+def _without_secret(text: str, secret: str) -> str:
+    if secret and secret in text:
+        return text.replace(secret, "***")
+    return text
 
 
 DATA_API_URL = "https://data.alpaca.markets"

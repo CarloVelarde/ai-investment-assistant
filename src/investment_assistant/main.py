@@ -20,17 +20,27 @@ from investment_assistant.live_ingest import (
     backfill_and_replay,
     diagnose_stream_health,
     ingest_stream_minutes,
+    reconnect_stream,
     recover_stale_stream,
     run_after_close_daily,
 )
 from investment_assistant.logging_config import configure_logging
-from investment_assistant.market_data import MarketData, last_closed_session_date
+from investment_assistant.market_data import (
+    MarketData,
+    MarketDataError,
+    last_closed_session_date,
+)
 from investment_assistant.pipeline import run_market_history
 from investment_assistant.reporting import (
     Notifier,
     Researcher,
     create_fake_research_report,
     emit_console_notification,
+)
+from investment_assistant.stock_stream import (
+    StockStreamAuthError,
+    WebsocketStockStreamTransport,
+    stock_stream_url,
 )
 from investment_assistant.storage import SQLiteStorage
 
@@ -53,8 +63,9 @@ def main(
     """Start the application.
 
     Missing Alpaca keys keep the offline abrupt-drop fixture path. Live keys
-    run backfill, queued minutes, after-close daily, and stale recovery in
-    one process. Tests inject a fake provider and set ``loop=False``.
+    run backfill, then one stock websocket, after-close daily, and stale
+    recovery in one process. Tests inject a fake provider and set
+    ``loop=False``.
     """
 
     settings = settings or get_settings()
@@ -128,6 +139,7 @@ def run_live_session(
             watchlist=watchlist,
             clock=clock,
         )
+        _open_stock_stream(provider)
         while True:
             stream = ingest_stream_minutes(
                 storage=storage,
@@ -151,12 +163,22 @@ def run_live_session(
                     )
                     latest = _combine(latest, daily)
                     last_daily_date = session_day
+            reconnected = _reconnect_if_dropped(
+                provider,
+                storage=storage,
+                manager=manager,
+                watchlist=watchlist,
+                clock=clock,
+                sleeper=sleeper,
+            )
+            if reconnected is not None:
+                latest = _combine(latest, reconnected)
             stale = diagnose_stream_health(
                 health,
                 now=clock.now(),
                 session=session,
             )
-            if stale.is_stale:
+            if stale.is_stale and reconnected is None:
                 recovered = recover_stale_stream(
                     storage=storage,
                     manager=manager,
@@ -170,7 +192,8 @@ def run_live_session(
             manager.process_pending(researcher=researcher, notifier=notifier)
             if not loop:
                 break
-            sleeper(LIVE_POLL_SECONDS)
+            if not getattr(provider, "holds_stock_stream", False):
+                sleeper(LIVE_POLL_SECONDS)
     return latest
 
 
@@ -180,16 +203,54 @@ def build_live_provider(settings: Settings, clock: Clock) -> AlpacaMarketData:
     secret = settings.alpaca_api_secret_key.get_secret_value()
     key_id = settings.alpaca_api_key_id
     trading_url = settings.alpaca_trading_url
+    feed = settings.alpaca_feed
     return AlpacaMarketData(
         http=UrllibHistoryHttp(key_id=key_id, secret=secret),
         clock=clock,
-        feed=settings.alpaca_feed,
+        feed=feed,
         sleeper=time.sleep,
         session_provider=lambda: fetch_alpaca_session(
             trading_url,
             key_id=key_id,
             secret=secret,
         ),
+        transport=WebsocketStockStreamTransport(stock_stream_url(feed)),
+        key_id=key_id,
+        secret=secret,
+        symbols=settings.watched_tickers(),
+    )
+
+
+def _open_stock_stream(provider: MarketData) -> None:
+    opener = getattr(provider, "open_stock_stream", None)
+    if not callable(opener):
+        return
+    try:
+        opener()
+    except StockStreamAuthError:
+        raise
+    except MarketDataError:
+        logger.warning("Stock stream not open after backfill; will retry")
+
+
+def _reconnect_if_dropped(
+    provider: MarketData,
+    *,
+    storage: SQLiteStorage,
+    manager: EventManager,
+    watchlist: tuple[str, ...],
+    clock: Clock,
+    sleeper: Callable[[float], None],
+) -> LiveIngestResult | None:
+    if not getattr(provider, "needs_stream_reconnect", False):
+        return None
+    return reconnect_stream(
+        storage=storage,
+        manager=manager,
+        provider=provider,
+        watchlist=watchlist,
+        clock=clock,
+        sleeper=sleeper,
     )
 
 
