@@ -17,3 +17,5 @@ wheels/
 
 # Local application state
 investment_assistant.db
+
+.env
