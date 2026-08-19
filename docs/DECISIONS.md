@@ -117,7 +117,9 @@ Market and significant news signals may each qualify an event without the other.
 
 One fast detector evaluates completed market bars for abrupt movement. One fixed after-close daily scan evaluates five- and twenty-trading-day movement, recent-high drawdown, and broad-market-relative performance. Both use the same normalized history, signal contract, and event manager; there is no separate weekly service or user-configurable cadence initially.
 
-**Why:** Two cadences catch abrupt and gradual movement without creating two systems or unnecessary scheduling options.
+D-026 adds a third evaluation in that same pipeline: a session-open gap check (prior regular close vs today’s regular open). It is not a second process.
+
+**Why:** Two cadences catch abrupt and gradual movement without creating two systems or unnecessary scheduling options. The open-gap check fills a hole those two cadences miss.
 
 ### D-020 — Let material escalation bypass suppression
 
@@ -130,7 +132,7 @@ This refines D-006: sustained movement belongs to one evolving episode, but a ma
 Milestone 3 fixes offline market evaluation as follows:
 
 - Persist normalized completed bars for watchlist symbols and `SPY`; evaluate only completed bars.
-- One fast detector (`abrupt_move` / one-hour) and one after-close daily detector (`multi_day_move`, `drawdown_from_high`, `relative_to_spy`) share the Milestone 2 signal contract and event manager.
+- One fast detector (`abrupt_move` / one-hour) and one after-close daily detector (`multi_day_move`, `drawdown_from_high`, `relative_to_spy`) share the Milestone 2 signal contract and event manager. D-026 adds `session_gap` / `SESSION_OPEN` in that same contract.
 - Thresholds, importance steps, volume dampening for the fast rule, crossing, and rearm (rearm line = half the `MODERATE` magnitude) are defined in the Milestone 3 feature spec, not left open.
 - Detector baseline state is durable so replay does not re-fire settled crossings.
 - Each completed-bar step commits the bar, detector state, emitted signals/events,
@@ -161,9 +163,9 @@ Milestone 4 connects live prices without changing Milestone 3 detectors:
 
 - Alpaca REST supplies history; **one stock websocket** supplies completed minute bars and late minute revisions during regular hours. That socket is required for daytime watch. REST backfill and after-close daily are not a substitute. SDK types stop at the adapter.
 - Default feed is IEX so a free Basic account works. SIP is optional config when the account allows it.
-- Streaming `dailyBars` are not completed days. Daily evaluation uses REST `1Day` bars after the regular close.
+- Streaming `dailyBars` are not completed days. REST `1Day` bars for a session that has not yet closed are also not completed days (D-027). Daily evaluation uses completed REST `1Day` bars after the regular close.
 - Fast evaluation uses regular-session minutes only (09:30–16:00 ET).
-- Startup backfill quiet-replays older bars into detector state and emits only from today’s regular open onward.
+- Startup backfill quiet-replays older bars into detector state and emits only from today’s regular open onward. A bar must also have actually ended (`end_at <= now`) before it can emit.
 - A market `signal_id` includes importance so a same-minute `updatedBars` revision can escalate. Same bar and same importance is still a duplicate.
 - Live news stays Milestone 5. The same keys will be reused; this milestone does not open the news socket.
 
@@ -181,6 +183,32 @@ Two optional switches are independent of each other and of `LOG_LEVEL` / `LOG_JS
 Neither is on by default. Secrets never appear in either stream. Interval and wording stay feature-level.
 
 **Why:** Idle live mode must be able to look alive without turning the default log into a firehose. Verbose tracing must not be required to get a heartbeat.
+
+### D-026 — Check the session-open gap as its own market rule
+
+This refines D-019 and D-021.
+
+After a regular session opens, compare each watchlist name’s **prior completed regular close** to **today’s regular open**. A large overnight or weekend jump is a reason to look, even when no 60-minute window and no 5-/20-day daily rule would fire.
+
+- Rule name: `session_gap`. Window: `SESSION_OPEN`.
+- Direction follows the gap (up or down). Same importance ladder and rearm style as the fast rule; exact percentages live in spec 006.
+- Evaluate **once per symbol per regular session**, when today’s open and the prior close are both known. Restarts the same day stay quiet if that crossing is already in detector state.
+- This is not open-to-close of the same day, not a 1-hour move, and not a substitute for the after-close daily scan.
+- Detectors still only emit signals. The existing event manager still decides research.
+
+**Why:** A 450 close to a 480 open is exactly “what happened while I was away?” The 1-hour rule only catches that by accident, and only if the process already had yesterday’s minutes. A morning start misses it. Live trial 19 Aug 2026 made that gap obvious.
+
+### D-027 — Do not treat an in-progress REST daily bar as a completed day
+
+This refines D-024. Observed on the 19 Aug 2026 live trial.
+
+Alpaca REST `1Day` history includes **today’s running daily** while the regular session is still open. Streaming `dailyBars` were already ignored; the REST twin was not. The adapter stamped that bar complete, set `end_at` to 16:00 ET, and backfill emitted daily signals hours before the close. A restart later the same day could flip a daily rule as the running close moved (AMD 20-day HIGH at 10:25 ET; TSLA vs SPY 5-day on restart).
+
+- A `1Day` bar is complete only after that session has closed (`end_at <= now`, or the trading clock says that session is closed).
+- Quiet replay must not write `last_emitted_importance` from an incomplete daily.
+- After the close, the completed daily may emit through the existing daily detector.
+
+**Why:** Daily rules mean “the day finished.” Treating a 10:25 print as the 16:00 close creates false research and makes restarts change the story.
 
 ## Rejected
 
@@ -212,3 +240,5 @@ Resolved in feature specs / accepted decisions above when applicable:
 - Detection thresholds, severity, rearm, and market episode open/close → D-021 and Milestone 3 spec.
 - Live market source, IEX default, after-close daily REST, quiet backfill → D-024 and Milestone 4 spec.
 - Quiet default logs; independent heartbeat and watch-log opt-ins → D-025 and the ops-visibility spec.
+- Session-open gap (prior close vs today’s open) → D-026 and spec 006.
+- In-progress REST `1Day` is not a completed day → D-027 and spec 006.

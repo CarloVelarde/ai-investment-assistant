@@ -58,12 +58,13 @@ The application has no brokerage connection.
 
 ### Market monitoring
 
-Maintain normalized market history for the watchlist and a few comparison symbols. Use two deterministic evaluations in one pipeline:
+Maintain normalized market history for the watchlist and a few comparison symbols. Use three deterministic evaluations in one pipeline:
 
-- A fast detector evaluates completed bars for abrupt movement.
-- A fixed after-close daily scan evaluates five- and twenty-trading-day movement, drawdown from a recent high, and performance relative to `SPY`.
+- A fast detector evaluates completed minute bars for abrupt movement over about one hour.
+- A session-open check compares the prior regular close to today’s regular open so a large overnight or weekend gap can be reviewed.
+- A fixed after-close daily scan evaluates five- and twenty-trading-day movement, drawdown from a recent high, and performance relative to `SPY`. Daily rules use **completed** days only. A running same-day price is not a finished close.
 
-Both produce the same market-signal shape and use volume and volatility as understandable supporting inputs. Exact thresholds belong to their feature specs. During regular hours the live app watches completed one-minute bars from one stock stream so a sudden drop or rise can surface shortly after the minute ends. Detect stale or interrupted data and recover missing bars when possible.
+All three produce the same market-signal shape and use volume and volatility as understandable supporting inputs. Exact thresholds belong to their feature specs. During regular hours the live app watches completed one-minute bars from one stock stream so a sudden drop or rise can surface shortly after the minute ends. Detect stale or interrupted data and recover missing bars when possible.
 
 ### News monitoring
 
@@ -83,7 +84,7 @@ One event manager routes independent market and news signals into durable events
 - Significant news before a price reaction, including significant good news.
 - Broad-market or sector movement.
 - Duplicate articles and materially new evidence.
-- Abrupt movement and gradual multi-day or multi-week movement.
+- Abrupt movement, a large overnight or weekend gap, and gradual multi-day or multi-week movement.
 
 Sustained movement remains one evolving episode. Repeated evidence at the same severity is recorded quietly; a worse severity, a newly crossed horizon, or significant new news may justify another research run and notification. Events retain enough lifecycle state for deduplication, cooldowns, retries, and restart-safe processing.
 
@@ -151,7 +152,7 @@ The MVP is successful when:
 
 1. A small configured watchlist can be monitored during regular market hours.
 2. Interrupted data is detected and missing minute bars can be recovered.
-3. Fast and daily deterministic rules detect understandable abrupt and gradual market movement.
+3. Fast, session-open gap, and daily deterministic rules detect understandable abrupt, overnight, and gradual market movement.
 4. News is filtered and classified without researching every article; significant good news and bad news can both qualify.
 5. Independent market and news signals route through one event manager and related signals become one evolving event.
 6. Each research-eligible event or material update produces one bounded research run.

@@ -4,7 +4,14 @@
 
 ## Current focus
 
-**Milestone 4 — Live market data** is complete. Opt-in heartbeat and watch logging ([spec 005](../specs/005-ops-visibility/SPEC.md)) is in. The next product feature is Milestone 5 (live news and classification). Do not start it until that spec is approved.
+**Spec 006 — Live session hardening** is next. Do not start Milestone 5 until 006 is complete and the Milestone 5 spec is approved.
+
+The live socket (Milestone 4) and opt-in heartbeat / watch log ([spec 005](../specs/005-ops-visibility/SPEC.md)) are in. A 19 Aug 2026 live trial showed two follow-ups that must land before news work:
+
+1. Fix daily rules firing on Alpaca’s **in-progress** REST `1Day` bar during the regular session.
+2. Add a **session-open gap** check (prior regular close vs today’s regular open).
+
+Details: [`specs/006-live-session-hardening/`](../specs/006-live-session-hardening/SPEC.md).
 
 ## Milestones
 
@@ -61,7 +68,19 @@ Add Alpaca market history and streaming behind the existing input boundary. Add 
 
 **Completed:** Settings, normalization, the market-data port, REST backfill, quiet replay, stream ingest, after-close daily, reconnect/gap fill, and stale-stream rules. `main` uses the live path when keys exist. Production REST and the trading clock use stdlib HTTP. Live mode opens **one** stock websocket (`wss://stream.data.alpaca.markets/v2/{feed}`), authenticates, subscribes the watchlist plus `SPY` to `bars` and `updatedBars`, and feeds completed minutes through the existing ingest path. The news socket is not opened.
 
+**Live trial (19 Aug 2026):** the socket, minute ingest, fast detector, heartbeat, and clean Ctrl+C behaved as specified. Two follow-ups are **not** part of this milestone’s remaining socket work; they are [spec 006](../specs/006-live-session-hardening/SPEC.md).
+
 **Complete when:** a small watchlist reliably feeds normalized live and recovered bars through both market evaluation modes during regular market operation.
+
+### Spec 006 — Live session hardening
+
+**Status:** Approved, not started
+
+**Spec:** [`specs/006-live-session-hardening/`](../specs/006-live-session-hardening/SPEC.md)
+
+Correct the live-trial daily-bar emit bug and add the session-open gap rule. Keep Milestone 3 thresholds for the existing fast and daily rules. Add no news client.
+
+**Complete when:** an open-session REST daily cannot create research, and a large prior-close-to-open gap can, once per session, through the existing event manager.
 
 ### Milestone 5 — Live news and classification
 

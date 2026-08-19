@@ -165,4 +165,13 @@ There is still no weekly job and no user cadence setting.
 
 ## Open questions
 
-- None for the remaining slice. The stock socket URL, `bars` + `updatedBars` only, one connection, and news deferral are fixed above. Which library opens the socket is an implementation choice behind the adapter. Tune stale timers later only with live evidence (Milestone 8).
+- None for the socket slice. The stock socket URL, `bars` + `updatedBars` only, one connection, and news deferral are fixed above.
+
+## Known follow-up (live trial 19 Aug 2026)
+
+The socket, minute ingest, fast detector, heartbeat, and clean Ctrl+C matched this spec. Two problems are **not** fixed here:
+
+1. Alpaca REST `1Day` includes today’s **running** daily while the session is open. Backfill treated that bar as complete and emitted daily signals before 16:00 ET. A restart the same day could change the daily story as the running close moved.
+2. A large overnight gap (prior close vs today’s open) is not a first-class rule. The 1-hour detector only catches it by accident, and a morning start often misses it.
+
+Corrective work and the new gap rule live in [spec 006](../006-live-session-hardening/SPEC.md). Do not reopen this milestone’s socket tasks for that work.

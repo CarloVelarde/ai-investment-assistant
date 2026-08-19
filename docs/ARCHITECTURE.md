@@ -63,11 +63,12 @@ Adapters retrieve market and news data and convert provider responses into valid
 Detection consumes normalized records and only produces signals; it does not enqueue research.
 
 - The fast market detector evaluates completed bars for abrupt movement and emits only on a qualifying threshold crossing or material severity escalation; same-severity continuation stays quiet until rearm.
-- The after-close daily market detector uses the same history to evaluate five- and twenty-trading-day movement, recent-high drawdown, and performance relative to `SPY`.
+- A session-open gap check compares the prior completed regular close to today’s regular open (`session_gap`). It runs once per symbol per session.
+- The after-close daily market detector uses the same history to evaluate five- and twenty-trading-day movement, recent-high drawdown, and performance relative to `SPY`. Only **completed** daily bars count. An in-progress REST `1Day` bar is not a finished day.
 - Storage-backed detector reads are bounded to the rule lookback and evaluated as of the triggering bar. Older recovered bars cannot rewind newer detector state; delayed same-session `SPY` data can complete a relative rule that was skipped earlier.
 - News passes deterministic filters before a small structured classifier. The classifier may emit a significant news signal without a market signal. Significance is independent of direction: good news (for example an earnings beat or acquisition) and bad news can both qualify. Rejected articles never become signals. The current offline fixtures use a temporary negative-phrase rule until Milestone 5.
 
-There is no separate weekly pipeline. Exact thresholds, severity boundaries, and rearm rules are feature-level decisions (Milestone 3 owns the first offline market set). Detector baseline state is durable for replay. Detection failures remain visible without crashing the application.
+There is no separate weekly pipeline. Exact thresholds, severity boundaries, and rearm rules are feature-level decisions (Milestone 3 owns the first offline market set; spec 006 owns the session-open gap). Detector baseline state is durable for replay. Detection failures remain visible without crashing the application.
 
 ### Events
 
@@ -155,5 +156,6 @@ Lifecycle state survives restarts. Interrupted research resumes research, while 
 - [Market history and offline detection](../specs/003-market-history-and-offline-detection/SPEC.md) added persisted bars, fast/daily deterministic market rules, detector rearm state, and open/closed market episodes.
 - [Live market data](../specs/004-live-market-data/SPEC.md) feeds those same bars from Alpaca REST history, after-close daily bars, and one stock websocket so completed regular-session minutes reach the fast detector in near real time.
 - [Ops visibility](../specs/005-ops-visibility/SPEC.md) adds an optional live heartbeat and a separate optional watch logger. It does not change market rules or replace Milestone 5.
+- [Live session hardening](../specs/006-live-session-hardening/SPEC.md) is next: do not emit daily rules from an in-progress REST `1Day` bar, and add the session-open gap check. Do not start Milestone 5 until this spec is done.
 
-That path does not make news a gate for market events or market movement a gate for significant news. Later milestones add live market data, news classification that can accept significant good or bad news, real research, and Discord in roadmap order. Offline news detection today is a negative-phrase demo only.
+That path does not make news a gate for market events or market movement a gate for significant news. Later milestones add news classification that can accept significant good or bad news, real research, and Discord in roadmap order. Offline news detection today is a negative-phrase demo only.
