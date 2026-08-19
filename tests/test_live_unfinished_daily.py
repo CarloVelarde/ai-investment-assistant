@@ -21,6 +21,7 @@ from investment_assistant.market_metrics import (
 from investment_assistant.models import (
     Event,
     MarketBar,
+    MarketSignal,
     MarketTimeframe,
     MarketWindow,
     ResearchReport,
@@ -139,6 +140,7 @@ def test_unfinished_today_daily_does_not_emit_or_save_high_state(
             researcher=_recording_researcher(research_calls),
             notifier=lambda *_: None,
         )
+        events = storage.list_events()
         today_bar = next(
             bar
             for bar in storage.list_market_bars("AMD", MarketTimeframe.ONE_DAY)
@@ -167,6 +169,7 @@ def test_unfinished_today_daily_does_not_emit_or_save_high_state(
     assert today_bar.close == Decimal("84.21")
     assert result.accepted_signal_ids == ()
     assert processed == ()
+    assert events == ()
     assert research_calls == []
     assert twenty_day is not None
     assert twenty_day.last_emitted_importance is SignalImportance.MODERATE
@@ -174,6 +177,70 @@ def test_unfinished_today_daily_does_not_emit_or_save_high_state(
     assert five_day.last_emitted_importance is SignalImportance.HIGH
     assert drawdown is not None
     assert drawdown.last_emitted_importance is SignalImportance.MODERATE
+
+
+def test_same_amd_day_emits_high_after_the_session_closes(tmp_path: Path) -> None:
+    history = _amd_history(today_close=Decimal("84.21"))
+    closed_today = _daily(TODAY, Decimal("84.21"), retrieved_at=CLOSED_AT)
+    research_calls: list[int] = []
+
+    with SQLiteStorage(tmp_path / "amd-after-close.sqlite3") as storage:
+        storage.initialize()
+        open_clock = SteppingClock(OPEN_AT)
+        manager = EventManager(storage, clock=open_clock)
+        open_result = backfill_and_replay(
+            storage=storage,
+            manager=manager,
+            provider=FakeMarketData(history=history, session=OPEN_SESSION),
+            watchlist=("AMD", "SPY"),
+            clock=open_clock,
+        )
+        open_processed = manager.process_pending(
+            researcher=_recording_researcher(research_calls),
+            notifier=lambda *_: None,
+        )
+        closed_clock = SteppingClock(CLOSED_AT)
+        closed_manager = EventManager(storage, clock=closed_clock)
+        closed = run_after_close_daily(
+            storage=storage,
+            manager=closed_manager,
+            provider=FakeMarketData(history=(closed_today,), session=CLOSED_SESSION),
+            watchlist=("AMD", "SPY"),
+            clock=closed_clock,
+        )
+        processed = closed_manager.process_pending(
+            researcher=_recording_researcher(research_calls),
+            notifier=lambda *_: None,
+        )
+        today_bar = next(
+            bar
+            for bar in storage.list_market_bars("AMD", MarketTimeframe.ONE_DAY)
+            if bar.start_at.date() == TODAY
+        )
+        twenty_day = storage.get_detector_state(
+            "AMD",
+            RULE_MULTI_DAY_MOVE,
+            MarketWindow.TWENTY_DAYS,
+            SignalDirection.DOWN,
+        )
+        rules = {
+            signal.rule
+            for event in storage.list_events()
+            for signal in storage.list_signals(event.event_id)
+            if isinstance(signal, MarketSignal)
+        }
+
+    assert open_result.accepted_signal_ids == ()
+    assert open_processed == ()
+    assert today_bar.is_complete is True
+    assert today_bar.close == Decimal("84.21")
+    assert len(closed.accepted_signal_ids) >= 1
+    assert len(processed) == 1
+    assert research_calls == [processed[0].current_update]
+    assert processed[0].current_update >= 1
+    assert RULE_MULTI_DAY_MOVE in rules
+    assert twenty_day is not None
+    assert twenty_day.last_emitted_importance is SignalImportance.HIGH
 
 
 def test_moved_unfinished_close_does_not_escalate_and_close_may_emit(
@@ -262,7 +329,14 @@ def test_moved_unfinished_close_does_not_escalate_and_close_may_emit(
             signal.rule
             for event in storage.list_events()
             for signal in storage.list_signals(event.event_id)
+            if isinstance(signal, MarketSignal)
         }
+        relative = storage.get_detector_state(
+            "TSLA",
+            RULE_RELATIVE_TO_SPY,
+            MarketWindow.FIVE_DAYS,
+            SignalDirection.UP,
+        )
 
     assert first.accepted_signal_ids == ()
     assert second.accepted_signal_ids == ()
@@ -273,3 +347,5 @@ def test_moved_unfinished_close_does_not_escalate_and_close_may_emit(
     assert len(closed_processed) == 1
     assert research_calls == [1]
     assert RULE_RELATIVE_TO_SPY in rules
+    assert relative is not None
+    assert relative.last_emitted_importance is SignalImportance.MODERATE
