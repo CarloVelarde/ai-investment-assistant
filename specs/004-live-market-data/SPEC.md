@@ -169,9 +169,9 @@ There is still no weekly job and no user cadence setting.
 
 ## Known follow-up (live trial 19 Aug 2026)
 
-The socket, minute ingest, fast detector, heartbeat, and clean Ctrl+C matched this spec. Two problems are **not** fixed here:
+The socket, minute ingest, fast detector, heartbeat, and clean Ctrl+C matched this spec. Two problems are **not** fixed here. Spec 006 states each issue and the replacement:
 
-1. Alpaca REST `1Day` includes today’s **running** daily while the session is open. Backfill treated that bar as complete and emitted daily signals before 16:00 ET. A restart the same day could change the daily story as the running close moved.
-2. A large overnight gap (prior close vs today’s open) is not a first-class rule. The 1-hour detector only catches it by accident, and a morning start often misses it.
+1. Unfinished same-day prices were treated as the official close, so `multi_day_move`, `drawdown_from_high`, and `relative_to_spy` ran before 16:00 ET.
+2. A jump from the last regular close to this morning’s open is not checked on purpose.
 
-Corrective work and the new gap rule live in [spec 006](../006-live-session-hardening/SPEC.md). Do not reopen this milestone’s socket tasks for that work.
+See [spec 006](../006-live-session-hardening/SPEC.md). Do not reopen this milestone’s socket tasks for that work.

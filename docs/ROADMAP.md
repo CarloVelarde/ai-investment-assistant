@@ -6,10 +6,10 @@
 
 **Spec 006 — Live session hardening** is next. Do not start Milestone 5 until 006 is complete and the Milestone 5 spec is approved.
 
-The live socket (Milestone 4) and opt-in heartbeat / watch log ([spec 005](../specs/005-ops-visibility/SPEC.md)) are in. A 19 Aug 2026 live trial showed two follow-ups that must land before news work:
+The live socket (Milestone 4) and opt-in heartbeat / watch log ([spec 005](../specs/005-ops-visibility/SPEC.md)) are in. A 19 Aug 2026 live trial found two problems that must be fixed before news work. The spec states each issue and the replacement behavior:
 
-1. Fix daily rules firing on Alpaca’s **in-progress** REST `1Day` bar during the regular session.
-2. Add a **session-open gap** check (prior regular close vs today’s regular open).
+1. Unfinished same-day prices were treated as the official close, so after-close daily rules fired while the market was still open.
+2. A jump from yesterday’s close to this morning’s open is not checked on purpose.
 
 Details: [`specs/006-live-session-hardening/`](../specs/006-live-session-hardening/SPEC.md).
 
@@ -68,7 +68,7 @@ Add Alpaca market history and streaming behind the existing input boundary. Add 
 
 **Completed:** Settings, normalization, the market-data port, REST backfill, quiet replay, stream ingest, after-close daily, reconnect/gap fill, and stale-stream rules. `main` uses the live path when keys exist. Production REST and the trading clock use stdlib HTTP. Live mode opens **one** stock websocket (`wss://stream.data.alpaca.markets/v2/{feed}`), authenticates, subscribes the watchlist plus `SPY` to `bars` and `updatedBars`, and feeds completed minutes through the existing ingest path. The news socket is not opened.
 
-**Live trial (19 Aug 2026):** the socket, minute ingest, fast detector, heartbeat, and clean Ctrl+C behaved as specified. Two follow-ups are **not** part of this milestone’s remaining socket work; they are [spec 006](../specs/006-live-session-hardening/SPEC.md).
+**Live trial (19 Aug 2026):** the socket, minute ingest, fast detector, heartbeat, and clean Ctrl+C behaved as specified. The two problems above are owned by [spec 006](../specs/006-live-session-hardening/SPEC.md), not by more socket tasks here.
 
 **Complete when:** a small watchlist reliably feeds normalized live and recovered bars through both market evaluation modes during regular market operation.
 
@@ -78,9 +78,12 @@ Add Alpaca market history and streaming behind the existing input boundary. Add 
 
 **Spec:** [`specs/006-live-session-hardening/`](../specs/006-live-session-hardening/SPEC.md)
 
-Correct the live-trial daily-bar emit bug and add the session-open gap rule. Keep Milestone 3 thresholds for the existing fast and daily rules. Add no news client.
+Stop after-close daily rules from running on today’s still-moving price. Add a session-open gap rule that compares the last regular close to today’s regular open. Keep the existing fast and daily thresholds. Add no news client.
 
-**Complete when:** an open-session REST daily cannot create research, and a large prior-close-to-open gap can, once per session, through the existing event manager.
+**Complete when:**
+
+- `multi_day_move`, `drawdown_from_high`, and `relative_to_spy` run only after the regular session has closed, on finished daily bars. They do not run on today’s still-moving price, and a restart during the session does not change that story.
+- A move of 3% or more from the last regular close to today’s regular open emits `session_gap` once that session. A same-session restart does not research the same gap again.
 
 ### Milestone 5 — Live news and classification
 

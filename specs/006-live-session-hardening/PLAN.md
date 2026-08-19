@@ -6,8 +6,8 @@
 
 Two slices on the existing live path. Do not add a process, package, or provider.
 
-1. **Stop unfinished dailies from emitting.** Fix completeness and the emit predicate. Prove it with a fake open-session clock and an Alpaca-shaped today `1Day` bar.
-2. **Add `session_gap`.** New rule + window on the existing signal contract. Run it once per session when prior close and today’s open are known. Prove crossings, non-crossings, weekend, morning start, and restart quiet.
+1. **Issue 1 — unfinished daily prices.** Mark today’s still-open daily row incomplete. Do not run `multi_day_move`, `drawdown_from_high`, or `relative_to_spy` on it. Prove it with a fake clock during regular hours and an Alpaca-shaped today daily bar. After the clock is closed, those rules may still run on the finished day.
+2. **Issue 2 — session-open gap.** Add `session_gap`: last finished regular close vs today’s 09:30 open. Run it once per session. Prove crossings, non-crossings, weekend, a late morning start, and restart quiet.
 
 Keep Milestone 3 fast/daily numbers. Keep the stock socket as it is.
 

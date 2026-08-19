@@ -4,33 +4,62 @@
 
 ## Purpose
 
-Stop unfinished daily bars from creating research during the regular session, and notice a large overnight or weekend gap when the next session opens. Do this before Milestone 5.
+Fix two live-market problems found on 19 Aug 2026, then stop. Do not start Milestone 5 until this spec is done. Milestone 4’s stock socket stays as shipped.
 
-This is the next implementation slice. Milestone 4’s stock socket stays as shipped.
+## Issues
 
-## Why now
+### Issue 1 — Unfinished daily prices fire after-close rules
 
-A live trial on **Wednesday 19 Aug 2026** (regular session open, IEX, watchlist TSLA / AMD / SPY) showed:
+**What is wrong**
 
-1. **Bug — in-progress REST daily treated as complete.** Startup backfill accepted Alpaca’s running `1Day` bar (`end_at` stamped 16:00 ET). At 10:25 ET that emitted AMD `multi_day_move` / 20-day **HIGH** (−15.79%). Through Tuesday’s completed close the same rule was only −11% (MODERATE) and should have stayed quiet. A restart at 10:38 ET moved today’s running closes (TSLA 339.77 → 343.77) and emitted a new TSLA `relative_to_spy` / 5-day **MODERATE** that did not exist on the first start.
-2. **Missing check — overnight / weekend gap.** There is no rule for “yesterday’s close vs this morning’s open.” The 1-hour detector can catch a gap only if the process already has yesterday’s last hour of minutes. A morning start backfills **today’s session only** and needs 61 minute bars to emit; by then the gap has rolled out of the window.
+The after-close rules are `multi_day_move`, `drawdown_from_high`, and `relative_to_spy`. They are supposed to run **after 16:00 ET** on a **finished** day’s close.
 
-What already worked in that trial: live mode, REST backfill, one IEX socket, every-minute AMD/TSLA/SPY bars, the fast detector (AMD −3.18% in 60 minutes, then quiet continuation), heartbeat, AMD restart dedup, secrets kept out of logs, Ctrl+C → `Stopped`.
+Alpaca’s history API still returns **today’s row** while the market is open. That row is the price so far, not the close. The app marked it complete, stamped its end time as 16:00 ET, and ran the after-close rules at 10:25 ET.
 
-Trial notes on the throwaway branch `scratch/live-run-check-2026-08-19` are evidence, not product truth.
+What the trial did:
+
+- AMD: 20-day `multi_day_move` fired **HIGH** (−15.79%) at 10:25 ET. Using Tuesday’s real close, the same rule was only −11% (MODERATE) and should have stayed quiet.
+- Restart at 10:38 ET: today’s still-moving closes had changed (TSLA 339.77 → 343.77). TSLA vs `SPY` over five days then crossed 5% and fired `relative_to_spy` **MODERATE**. A restart changed the daily story because the “close” was still moving.
+
+**What we do instead**
+
+- Treat today’s daily row as unfinished until the regular session has closed.
+- Do not run `multi_day_move`, `drawdown_from_high`, or `relative_to_spy` on that unfinished row.
+- Do not save “we already emitted” daily state from that unfinished row.
+- After 16:00 ET, run those three rules on the **finished** day, same as Milestone 3 and 4 already specify.
+- A restart while the market is open must not create or escalate a daily event just because today’s price moved.
+
+### Issue 2 — Overnight and weekend gaps are not checked
+
+**What is wrong**
+
+There is no rule for “the last regular close vs this morning’s open.”
+
+Example: AMD closes Wednesday at $450 and opens Thursday at $480. That +6.7% overnight jump is a reason to look. The current rules do not ask that question.
+
+- The 1-hour rule (`abrupt_move`) compares the last 60 **minute** closes. It can include the jump only if the process already stored yesterday’s last hour. Start the app Thursday morning and it backfills **today only**. It needs 61 minute bars before it will emit; by 10:30 ET the window is all Thursday and the overnight jump is gone.
+- The after-close rules compare closes over 5 or 20 days. They do not measure last close → this open, and they must not run until the day is finished (Issue 1).
+
+**What we do instead**
+
+Add one rule, `session_gap`: last finished regular close vs today’s regular open (the 09:30 ET open). Run it **once per symbol per session** when both numbers exist. Use the same 3% / 5% / 8% steps as the 1-hour rule. A same-session restart does not research the same gap again.
+
+This is not today’s open vs today’s close. It is not a 1-hour move. It does not replace the after-close scan.
+
+### What the trial already got right
+
+Live mode, history backfill, one IEX socket, minute bars for AMD / TSLA / SPY, the 1-hour detector (AMD −3.18% then quiet), heartbeat, AMD not re-notified on restart, no secrets in logs, Ctrl+C logged `Stopped`.
+
+Scratch notes on `scratch/live-run-check-2026-08-19` are evidence only. This spec is the product rule.
 
 ## Scope
 
 ### In scope
 
-- Treat a REST `1Day` bar as incomplete while that regular session is still open.
-- Emit daily signals only from **completed** daily bars (`end_at <= now`, or the clock says that session has closed).
-- Do not write daily `last_emitted_importance` from an incomplete daily bar.
-- After the regular close, today’s completed `1Day` bar may still run the existing daily detector.
-- Add market rule `session_gap` / window `SESSION_OPEN`: prior completed regular close vs today’s regular open.
-- Evaluate that gap once per symbol per regular session through the existing event manager, fake research, and console notify.
+- Issue 1: do not run `multi_day_move`, `drawdown_from_high`, or `relative_to_spy` on today’s unfinished daily price. After the close, those rules still run on the finished day.
+- Issue 2: add `session_gap` (last finished regular close vs today’s regular open). Evaluate once per symbol per session. Detectors emit; the event manager still decides research.
 - Tests with fakes and a controllable clock. No live Alpaca in pytest.
-- Regression coverage that matches the live-trial daily-bar failure.
+- Regression coverage for the trial’s AMD 20-day HIGH and TSLA vs `SPY` restart.
 
 ### Out of scope
 
@@ -44,21 +73,21 @@ Trial notes on the throwaway branch `scratch/live-run-check-2026-08-19` are evid
 
 ## Behavior
 
-### Bug: in-progress REST daily
+### Unfinished daily prices (Issue 1)
 
-Alpaca `GET /v2/stocks/bars` with `timeframe=1Day` and `end=now` can return **today** while the cash session is still open. That row is a running daily, not a finished day.
+Alpaca history can return **today’s** daily row while the cash session is still open. That row is not a finished day.
 
 Required behavior:
 
-1. If a `1Day` bar’s regular-session `end_at` is still in the future, it is **not complete**. Persist it only if we must, with `is_complete=false`, or omit it from evaluation. Incomplete bars do not run daily detectors.
-2. Replay may emit a daily bar only when `live_cutoff <= bar.end_at <= now`.
-3. Quiet replay of **completed** older days still updates detector state without research (unchanged).
-4. A restart during the regular session must not create or escalate a daily event just because today’s running close moved.
-5. After the clock says the regular session is closed, fetch and evaluate the **completed** `1Day` bars as Milestone 4 already specifies.
+1. If a daily bar’s regular-session end is still in the future, it is **not complete**. Do not run `multi_day_move`, `drawdown_from_high`, or `relative_to_spy` on it.
+2. Replay may send a daily bar to those rules only when the bar has already ended and that end is at or after today’s live cutoff (`live_cutoff <= bar.end_at <= now`).
+3. Quiet replay of **finished** older days still updates detector state without research (unchanged).
+4. A restart during the regular session must not create or escalate a daily event just because today’s still-moving price changed.
+5. After the clock says the regular session is closed, fetch and evaluate the **finished** daily bars as Milestone 4 already specifies.
 
-The live-trial AMD HIGH and TSLA relative-to-SPY alerts at 10:25–10:38 ET must not happen under these rules.
+The trial’s AMD 20-day HIGH at 10:25 ET and TSLA vs `SPY` alert on restart must not happen under these rules.
 
-### Feature: session-open gap
+### Session-open gap (Issue 2)
 
 **Question answered:** “Did this name jump a lot between the last regular close and this regular open?”
 

@@ -163,7 +163,7 @@ Milestone 4 connects live prices without changing Milestone 3 detectors:
 
 - Alpaca REST supplies history; **one stock websocket** supplies completed minute bars and late minute revisions during regular hours. That socket is required for daytime watch. REST backfill and after-close daily are not a substitute. SDK types stop at the adapter.
 - Default feed is IEX so a free Basic account works. SIP is optional config when the account allows it.
-- Streaming `dailyBars` are not completed days. REST `1Day` bars for a session that has not yet closed are also not completed days (D-027). Daily evaluation uses completed REST `1Day` bars after the regular close.
+- Streaming `dailyBars` are not finished days. Today’s still-open daily history row is also not a finished day (D-027). After-close rules use finished daily bars after the regular close.
 - Fast evaluation uses regular-session minutes only (09:30–16:00 ET).
 - Startup backfill quiet-replays older bars into detector state and emits only from today’s regular open onward. A bar must also have actually ended (`end_at <= now`) before it can emit.
 - A market `signal_id` includes importance so a same-minute `updatedBars` revision can escalate. Same bar and same importance is still a duplicate.
@@ -198,17 +198,17 @@ After a regular session opens, compare each watchlist name’s **prior completed
 
 **Why:** A 450 close to a 480 open is exactly “what happened while I was away?” The 1-hour rule only catches that by accident, and only if the process already had yesterday’s minutes. A morning start misses it. Live trial 19 Aug 2026 made that gap obvious.
 
-### D-027 — Do not treat an in-progress REST daily bar as a completed day
+### D-027 — Do not treat an unfinished daily price as the day’s close
 
 This refines D-024. Observed on the 19 Aug 2026 live trial.
 
-Alpaca REST `1Day` history includes **today’s running daily** while the regular session is still open. Streaming `dailyBars` were already ignored; the REST twin was not. The adapter stamped that bar complete, set `end_at` to 16:00 ET, and backfill emitted daily signals hours before the close. A restart later the same day could flip a daily rule as the running close moved (AMD 20-day HIGH at 10:25 ET; TSLA vs SPY 5-day on restart).
+Alpaca’s daily history still includes **today** while the regular session is open. That row is the price so far, not the close. Streaming `dailyBars` were already ignored; this history row was not. The app treated it as finished and ran `multi_day_move`, `drawdown_from_high`, and `relative_to_spy` hours before 16:00 ET. A restart the same day could change those results as the still-moving price changed (AMD 20-day HIGH at 10:25 ET; TSLA vs `SPY` on restart).
 
-- A `1Day` bar is complete only after that session has closed (`end_at <= now`, or the trading clock says that session is closed).
-- Quiet replay must not write `last_emitted_importance` from an incomplete daily.
-- After the close, the completed daily may emit through the existing daily detector.
+- A daily bar is complete only after that session has closed.
+- Do not save “already emitted” daily state from an unfinished daily row.
+- After the close, the finished daily may run those three rules as before.
 
-**Why:** Daily rules mean “the day finished.” Treating a 10:25 print as the 16:00 close creates false research and makes restarts change the story.
+**Why:** Those rules mean “the day finished.” Treating a 10:25 print as the 16:00 close creates false research and makes restarts change the story.
 
 ## Rejected
 
@@ -240,5 +240,5 @@ Resolved in feature specs / accepted decisions above when applicable:
 - Detection thresholds, severity, rearm, and market episode open/close → D-021 and Milestone 3 spec.
 - Live market source, IEX default, after-close daily REST, quiet backfill → D-024 and Milestone 4 spec.
 - Quiet default logs; independent heartbeat and watch-log opt-ins → D-025 and the ops-visibility spec.
-- Session-open gap (prior close vs today’s open) → D-026 and spec 006.
-- In-progress REST `1Day` is not a completed day → D-027 and spec 006.
+- Session-open gap (last regular close vs today’s regular open) → D-026 and spec 006.
+- Unfinished daily prices must not run after-close rules → D-027 and spec 006.

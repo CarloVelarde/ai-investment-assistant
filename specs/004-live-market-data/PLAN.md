@@ -14,7 +14,7 @@ The ingest path, one stock websocket, and fake-transport tests are in. Do not re
 
 ### Follow-up (do this next)
 
-Live-trial daily-bar emit and the session-open gap check are [spec 006](../006-live-session-hardening/PLAN.md), not more tasks on this plan.
+Unfinished daily prices firing after-close rules, and the missing last-close-to-this-open check, are [spec 006](../006-live-session-hardening/PLAN.md). Not more tasks on this plan.
 
 ## Alpaca facts (checked August 2026)
 
