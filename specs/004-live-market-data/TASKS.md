@@ -4,6 +4,8 @@
 
 **Execution status:** Complete
 
+Socket and live-loop tasks below are done. Live-trial follow-up (unfinished daily prices, session-open gap) is [spec 006](../006-live-session-hardening/TASKS.md).
+
 ## Tasks
 
 - [x] 1. Extend settings for Alpaca key id, secret, feed (`iex` default), trading URL, and watchlist. Prove missing keys stay offline, secrets are not logged, `SPY` is always watched, and more than 30 symbols including `SPY` is rejected.

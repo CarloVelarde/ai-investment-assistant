@@ -165,4 +165,13 @@ There is still no weekly job and no user cadence setting.
 
 ## Open questions
 
-- None for the remaining slice. The stock socket URL, `bars` + `updatedBars` only, one connection, and news deferral are fixed above. Which library opens the socket is an implementation choice behind the adapter. Tune stale timers later only with live evidence (Milestone 8).
+- None for the socket slice. The stock socket URL, `bars` + `updatedBars` only, one connection, and news deferral are fixed above.
+
+## Known follow-up (live trial 19 Aug 2026)
+
+The socket, minute ingest, fast detector, heartbeat, and clean Ctrl+C matched this spec. Two problems are **not** fixed here. Spec 006 states each issue and the replacement:
+
+1. Unfinished same-day prices were treated as the official close, so `multi_day_move`, `drawdown_from_high`, and `relative_to_spy` ran before 16:00 ET.
+2. A jump from the last regular close to this morning’s open is not checked on purpose.
+
+See [spec 006](../006-live-session-hardening/SPEC.md). Do not reopen this milestone’s socket tasks for that work.

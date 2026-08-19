@@ -10,6 +10,11 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from investment_assistant.detection import stable_signal_id
+from investment_assistant.market_data import (
+    is_regular_session_minute,
+    regular_session_close,
+    regular_session_open,
+)
 from investment_assistant.market_metrics import (
     DRAWDOWN_LOOKBACK_BARS,
     FAST_LOOKBACK_BARS,
@@ -19,6 +24,7 @@ from investment_assistant.market_metrics import (
     RULE_DRAWDOWN_FROM_HIGH,
     RULE_MULTI_DAY_MOVE,
     RULE_RELATIVE_TO_SPY,
+    RULE_SESSION_GAP,
     UNUSED_VOLUME_RATIO,
     dampen_importance,
     directional_magnitude,
@@ -228,6 +234,66 @@ def detect_fast_signals(
     return MarketDetectionResult(tuple(signals), tuple(states))
 
 
+def detect_session_gap_signals(
+    prior_daily: MarketBar,
+    opening_minute: MarketBar,
+    previous_states: Mapping[SignalDirection, DetectorState | None],
+    *,
+    now: datetime,
+) -> MarketDetectionResult:
+    """Evaluate the prior regular close against this session's first open."""
+
+    if prior_daily.timeframe is not MarketTimeframe.ONE_DAY:
+        raise ValueError("prior_daily must be a 1Day bar")
+    if opening_minute.timeframe is not MarketTimeframe.ONE_MINUTE:
+        raise ValueError("opening_minute must be a 1Min bar")
+    if not prior_daily.is_complete or not opening_minute.is_complete:
+        raise ValueError("session gap inputs must be complete")
+    if prior_daily.ticker != opening_minute.ticker:
+        raise ValueError("session gap inputs must have the same ticker")
+    if prior_daily.end_at > opening_minute.start_at:
+        raise ValueError("prior daily bar must end before the opening minute")
+
+    move = signed_return(prior_daily.close, opening_minute.open)
+    session_start = regular_session_open(opening_minute.start_at)
+    table = thresholds_for(RULE_SESSION_GAP, MarketWindow.SESSION_OPEN)
+    signals: list[MarketSignal] = []
+    states: list[DetectorState] = []
+    for direction in SignalDirection:
+        previous = previous_states.get(direction)
+        if _key_already_evaluated(previous, session_start, inclusive=True):
+            continue
+        magnitude = directional_magnitude(move, direction)
+        decision = decide_crossing(
+            ticker=opening_minute.ticker,
+            rule=RULE_SESSION_GAP,
+            window=MarketWindow.SESSION_OPEN,
+            direction=direction,
+            magnitude=magnitude,
+            candidate_importance=table.importance_for(magnitude),
+            previous=previous,
+            now=now,
+            evaluated_at=session_start,
+        )
+        states.append(decision.next_state)
+        if decision.emit_importance is not None:
+            signals.append(
+                _market_signal(
+                    opening_minute,
+                    importance=decision.emit_importance,
+                    direction=direction,
+                    rule=RULE_SESSION_GAP,
+                    window=MarketWindow.SESSION_OPEN,
+                    magnitude=magnitude,
+                    volume_ratio=UNUSED_VOLUME_RATIO,
+                    baseline_price=prior_daily.close,
+                    comparison_return_ratio=None,
+                    observed_price=opening_minute.open,
+                )
+            )
+    return MarketDetectionResult(tuple(signals), tuple(states))
+
+
 def detect_daily_signals(
     ticker_bars: Sequence[MarketBar],
     spy_bars: Sequence[MarketBar],
@@ -357,6 +423,86 @@ def detect_fast_from_storage(
     result = detect_fast_signals(bars, previous, now=now)
     _store_states(storage, result.states)
     return result
+
+
+def detect_session_gap_from_storage(
+    storage: SQLiteStorage,
+    ticker: str,
+    *,
+    session_at: datetime,
+    now: datetime,
+) -> MarketDetectionResult:
+    """Run one current-session gap check from persisted daily and minute bars."""
+
+    ticker = ticker.strip().upper()
+    session_start = regular_session_open(session_at)
+    session_end = regular_session_close(session_at)
+    minutes = storage.list_market_bars(
+        ticker,
+        MarketTimeframe.ONE_MINUTE,
+        complete_only=True,
+        start_at_or_after=session_start,
+        through_start_at=session_end,
+    )
+    opening_minute = next(
+        (bar for bar in minutes if is_regular_session_minute(bar.start_at)),
+        None,
+    )
+    if opening_minute is None:
+        return MarketDetectionResult(
+            (),
+            (),
+            (
+                f"session_gap waiting for {ticker}: no regular-session minute "
+                f"stored for {session_start.date().isoformat()}",
+            ),
+        )
+
+    daily_candidates = storage.list_market_bars(
+        ticker,
+        MarketTimeframe.ONE_DAY,
+        complete_only=True,
+        through_start_at=session_start,
+        limit=2,
+    )
+    prior_daily = next(
+        (bar for bar in reversed(daily_candidates) if bar.end_at <= session_start),
+        None,
+    )
+    if prior_daily is None:
+        return MarketDetectionResult(
+            (),
+            (),
+            (f"session_gap skipped for {ticker}: no completed prior daily close",),
+        )
+
+    previous = {
+        direction: storage.get_detector_state(
+            ticker,
+            RULE_SESSION_GAP,
+            MarketWindow.SESSION_OPEN,
+            direction,
+        )
+        for direction in SignalDirection
+    }
+    result = detect_session_gap_signals(
+        prior_daily,
+        opening_minute,
+        previous,
+        now=now,
+    )
+    _store_states(storage, result.states)
+    diagnostics = list(result.diagnostics)
+    if opening_minute.start_at != session_start:
+        diagnostics.append(
+            f"session_gap for {ticker} used first available regular-session minute "
+            f"at {opening_minute.start_at.isoformat()}; 09:30 ET minute missing"
+        )
+    return MarketDetectionResult(
+        result.signals,
+        result.states,
+        tuple(diagnostics),
+    )
 
 
 def detect_daily_from_storage(
@@ -518,6 +664,7 @@ def _market_signal(
     volume_ratio: Decimal,
     baseline_price: Decimal,
     comparison_return_ratio: Decimal | None,
+    observed_price: Decimal | None = None,
 ) -> MarketSignal:
     return MarketSignal(
         signal_id=stable_signal_id(
@@ -544,7 +691,7 @@ def _market_signal(
         price_decline_ratio=magnitude,
         volume_ratio=volume_ratio,
         baseline_price=baseline_price,
-        observed_price=bar.close,
+        observed_price=bar.close if observed_price is None else observed_price,
         comparison_return_ratio=comparison_return_ratio,
     )
 
@@ -606,13 +753,16 @@ def _state(
 def _key_already_evaluated(
     state: DetectorState | None,
     evaluated_at: datetime,
+    *,
+    inclusive: bool = False,
 ) -> bool:
-    # Strict > keeps same-start re-evaluation open for updatedBars and delayed SPY.
-    return (
-        state is not None
-        and state.last_evaluated_at is not None
-        and state.last_evaluated_at > evaluated_at
-    )
+    # Fast/daily use strict > for updatedBars and delayed SPY. Session gaps use
+    # inclusive comparison because each regular session gets exactly one check.
+    if state is None or state.last_evaluated_at is None:
+        return False
+    if inclusive:
+        return state.last_evaluated_at >= evaluated_at
+    return state.last_evaluated_at > evaluated_at
 
 
 def _store_states(

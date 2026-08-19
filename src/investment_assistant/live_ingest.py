@@ -22,7 +22,9 @@ from investment_assistant.market_data import (
     regular_session_close,
     regular_session_open,
     stream_minute_from_alpaca,
+    with_daily_completeness,
 )
+from investment_assistant.market_detection import detect_session_gap_from_storage
 from investment_assistant.models import MarketBar, MarketTimeframe
 from investment_assistant.ops_log import watch
 from investment_assistant.pipeline import MarketBarProcessingResult, process_market_bar
@@ -150,6 +152,15 @@ def ingest_stream_minute(
         watchlist=watched,
         now=now,
     )
+    if _is_first_regular_minute(storage, bar, session_at=now):
+        gap = _process_session_gap(
+            storage=storage,
+            manager=manager,
+            ticker=bar.ticker,
+            session_at=now,
+            now=now,
+        )
+        result = _combine_processing_results(result, gap)
     watch(
         "Stream minute evaluated",
         ticker=bar.ticker,
@@ -468,7 +479,9 @@ def _replay_bars(
     diagnostics: list[str] = []
     closed: list[str] = []
     persisted: list[str] = []
+    as_of = clock.now()
     for bar in _bars_in_evaluation_order(bars):
+        bar = with_daily_completeness(bar, as_of=as_of)
         _sync_clock(clock, bar.end_at)
         outcome = process_market_bar(
             storage=storage,
@@ -476,18 +489,40 @@ def _replay_bars(
             bar=bar,
             watchlist=watchlist,
             now=clock.now(),
-            emit_signals=bar.end_at >= cutoff,
+            emit_signals=_replay_may_emit(bar, cutoff=cutoff, as_of=as_of),
         )
         persisted.append(bar.bar_id)
         accepted.extend(outcome.accepted_signal_ids)
         diagnostics.extend(outcome.diagnostics)
         closed.extend(outcome.closed_event_ids)
+    for ticker in sorted(watchlist):
+        gap = _process_session_gap(
+            storage=storage,
+            manager=manager,
+            ticker=ticker,
+            session_at=as_of,
+            now=as_of,
+        )
+        accepted.extend(gap.accepted_signal_ids)
+        diagnostics.extend(gap.diagnostics)
+        closed.extend(gap.closed_event_ids)
     return LiveIngestResult(
         accepted_signal_ids=tuple(accepted),
         diagnostics=tuple(diagnostics),
         closed_event_ids=tuple(closed),
         persisted_bar_ids=tuple(persisted),
     )
+
+
+def _replay_may_emit(
+    bar: MarketBar,
+    *,
+    cutoff: datetime,
+    as_of: datetime,
+) -> bool:
+    """Return True when a replayed bar may send signals to the event manager."""
+
+    return bar.is_complete and cutoff <= bar.end_at <= as_of
 
 
 def _bars_in_evaluation_order(bars: tuple[MarketBar, ...]) -> tuple[MarketBar, ...]:
@@ -509,3 +544,64 @@ def _sync_clock(clock: Clock, when: datetime) -> None:
     advance_to = getattr(clock, "advance_to", None)
     if callable(advance_to):
         advance_to(when)
+
+
+def _process_session_gap(
+    *,
+    storage: SQLiteStorage,
+    manager: EventManager,
+    ticker: str,
+    session_at: datetime,
+    now: datetime,
+) -> MarketBarProcessingResult:
+    accepted: list[str] = []
+    with storage.transaction():
+        result = detect_session_gap_from_storage(
+            storage,
+            ticker,
+            session_at=session_at,
+            now=now,
+        )
+        for signal in result.signals:
+            if manager.handle_signal(signal).accepted:
+                accepted.append(signal.signal_id)
+    return MarketBarProcessingResult(
+        accepted_signal_ids=tuple(accepted),
+        diagnostics=result.diagnostics,
+    )
+
+
+def _is_first_regular_minute(
+    storage: SQLiteStorage,
+    bar: MarketBar,
+    *,
+    session_at: datetime,
+) -> bool:
+    session_start = regular_session_open(session_at)
+    session_end = regular_session_close(session_at)
+    minutes = storage.list_market_bars(
+        bar.ticker,
+        MarketTimeframe.ONE_MINUTE,
+        complete_only=True,
+        start_at_or_after=session_start,
+        through_start_at=session_end,
+    )
+    first = next(
+        (item for item in minutes if is_regular_session_minute(item.start_at)),
+        None,
+    )
+    return first is not None and first.bar_id == bar.bar_id
+
+
+def _combine_processing_results(
+    first: MarketBarProcessingResult,
+    second: MarketBarProcessingResult,
+) -> MarketBarProcessingResult:
+    return MarketBarProcessingResult(
+        accepted_signal_ids=(
+            *first.accepted_signal_ids,
+            *second.accepted_signal_ids,
+        ),
+        diagnostics=(*first.diagnostics, *second.diagnostics),
+        closed_event_ids=(*first.closed_event_ids, *second.closed_event_ids),
+    )

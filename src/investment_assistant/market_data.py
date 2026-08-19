@@ -1,7 +1,7 @@
 """Replaceable market-data boundary and Alpaca payload normalization."""
 
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -205,6 +205,32 @@ def live_cutoff(now: datetime) -> datetime:
     return regular_session_open(now)
 
 
+def with_daily_completeness(bar: MarketBar, *, as_of: datetime) -> MarketBar:
+    """Mark a daily bar unfinished when its session has not ended yet.
+
+    Minute bars are unchanged. A daily bar already marked unfinished stays
+    unfinished even if ``as_of`` is later; callers pass a completed replacement
+    when the session has closed.
+    """
+
+    if bar.timeframe is not MarketTimeframe.ONE_DAY:
+        return bar
+    if bar.end_at > _aware_utc(as_of, "as_of") and bar.is_complete:
+        return replace(bar, is_complete=False)
+    return bar
+
+
+def _bar_is_finished(
+    timeframe: MarketTimeframe,
+    *,
+    end_at: datetime,
+    as_of: datetime,
+) -> bool:
+    if timeframe is not MarketTimeframe.ONE_DAY:
+        return True
+    return end_at <= _aware_utc(as_of, "as_of")
+
+
 def is_regular_session_minute(start_at: datetime) -> bool:
     """Return True when a minute bar starts in the 09:30–16:00 ET session."""
 
@@ -328,7 +354,7 @@ def market_bar_from_alpaca(
         low=_as_decimal(payload.get("l"), "l"),
         close=_as_decimal(payload.get("c"), "c"),
         volume=_as_decimal(payload.get("v"), "v"),
-        is_complete=True,
+        is_complete=_bar_is_finished(timeframe, end_at=end_at, as_of=retrieved_at),
         provider=ALPACA_PROVIDER,
         feed=feed,
         retrieved_at=retrieved_at,

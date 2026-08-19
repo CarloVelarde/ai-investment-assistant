@@ -8,16 +8,13 @@ Add a thin Alpaca adapter that produces the same `MarketBar` values Milestone 3 
 
 Work in slices: settings and watchlist, pure normalization, fake port, REST backfill, quiet replay vs live emit, stream **ingest**, after-close daily, reconnect/stale behavior, **then the real stock websocket**.
 
-### Remaining slice (do this next)
+### Socket slice (done)
 
-The ingest path already exists (`stream_minute_from_alpaca`, `ingest_stream_minute`, `reconnect_stream`, `StreamHealth`). Do not rebuild it.
+The ingest path, one stock websocket, and fake-transport tests are in. Do not rebuild them.
 
-1. Add a small **stock-stream transport** behind `AlpacaMarketData` (connect, auth, subscribe, read frames, close). Tests inject a fake transport that yields canned JSON frames. No network in pytest.
-2. Production transport opens **one** socket to `wss://stream.data.alpaca.markets/v2/{feed}`. Auth with the same keys within 10 seconds. Subscribe only `bars` and `updatedBars` for the watchlist plus `SPY`.
-3. Convert each frame to a mapping immediately, then `stream_minute_from_alpaca` → existing ingest. Ignore `dailyBars` and all other channels.
-4. Wire `main`'s live loop to run that stream after startup backfill, still one process. Reuse existing stale/reconnect/gap-fill. Do not open the news URL.
+### Follow-up (do this next)
 
-A websocket library or `alpaca-py` may be introduced **only** in this adapter. Prefer the smallest client that can hold one connection. SDK types must not leave the adapter.
+Unfinished daily prices firing after-close rules, and the missing last-close-to-this-open check, are [spec 006](../006-live-session-hardening/PLAN.md). Not more tasks on this plan.
 
 ## Alpaca facts (checked August 2026)
 

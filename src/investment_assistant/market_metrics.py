@@ -10,6 +10,7 @@ from decimal import Decimal
 from investment_assistant.models import MarketWindow, SignalDirection, SignalImportance
 
 RULE_ABRUPT_MOVE = "abrupt_move"
+RULE_SESSION_GAP = "session_gap"
 RULE_MULTI_DAY_MOVE = "multi_day_move"
 RULE_DRAWDOWN_FROM_HIGH = "drawdown_from_high"
 RULE_RELATIVE_TO_SPY = "relative_to_spy"
@@ -54,6 +55,11 @@ class ImportanceThresholds:
 
 
 _THRESHOLDS: dict[tuple[str, MarketWindow], ImportanceThresholds] = {
+    (RULE_SESSION_GAP, MarketWindow.SESSION_OPEN): ImportanceThresholds(
+        moderate=Decimal("0.03"),
+        high=Decimal("0.05"),
+        critical=Decimal("0.08"),
+    ),
     (RULE_ABRUPT_MOVE, MarketWindow.ONE_HOUR): ImportanceThresholds(
         moderate=Decimal("0.03"),
         high=Decimal("0.05"),

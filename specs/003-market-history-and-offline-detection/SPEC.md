@@ -24,6 +24,7 @@ Remember offline market price history, detect abrupt and gradual movement with c
 ### Out of scope
 
 - Live market streams, reconnection, stale-stream health, or provider SDKs (Milestone 4).
+- Session-open gap (prior regular close vs today’s regular open) and the in-progress REST daily-bar fix ([spec 006](../006-live-session-hardening/SPEC.md)).
 - Live news, AI classification, richer news matching (Milestone 5).
 - Real AI research, Discord, scheduling daemons, or multi-process workers.
 - User-configurable thresholds, custom scan cadences, or a separate weekly process.

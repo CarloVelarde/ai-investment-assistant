@@ -37,6 +37,7 @@ class SignalDirection(StrEnum):
 class MarketWindow(StrEnum):
     """Market horizons planned for the shared signal contract."""
 
+    SESSION_OPEN = "SESSION_OPEN"
     ONE_HOUR = "ONE_HOUR"
     FIVE_DAYS = "FIVE_DAYS"
     TWENTY_DAYS = "TWENTY_DAYS"
