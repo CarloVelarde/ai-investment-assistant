@@ -156,6 +156,6 @@ Lifecycle state survives restarts. Interrupted research resumes research, while 
 - [Market history and offline detection](../specs/003-market-history-and-offline-detection/SPEC.md) added persisted bars, fast/daily deterministic market rules, detector rearm state, and open/closed market episodes.
 - [Live market data](../specs/004-live-market-data/SPEC.md) feeds those same bars from Alpaca REST history, after-close daily bars, and one stock websocket so completed regular-session minutes reach the fast detector in near real time.
 - [Ops visibility](../specs/005-ops-visibility/SPEC.md) adds an optional live heartbeat and a separate optional watch logger. It does not change market rules or replace Milestone 5.
-- [Live session hardening](../specs/006-live-session-hardening/SPEC.md) is next: after-close daily rules run only on finished days; add `session_gap` (last regular close vs today’s regular open). Do not start Milestone 5 until this spec is done.
+- [Live session hardening](../specs/006-live-session-hardening/SPEC.md) completed the current live market loop: after-close daily rules run only on finished days, and `session_gap` compares the last regular close with today’s regular open once per symbol per session.
 
 That path does not make news a gate for market events or market movement a gate for significant news. Later milestones add news classification that can accept significant good or bad news, real research, and Discord in roadmap order. Offline news detection today is a negative-phrase demo only.

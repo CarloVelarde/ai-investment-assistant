@@ -4,7 +4,7 @@
 
 **Execution status:** Complete
 
-This is the active slice. Do not start Milestone 5 until these tasks are complete.
+This slice is complete. Milestone 5 has not started and requires its own approved spec.
 
 ## Tasks
 

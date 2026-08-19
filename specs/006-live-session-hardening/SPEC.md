@@ -145,13 +145,13 @@ A restart the same session must not research the same gap again.
 
 ## Acceptance criteria
 
-- [ ] AC-01: During a regular session, a fake REST `1Day` bar for **today** that would cross a daily threshold does **not** emit, does **not** create an event, and does **not** write daily `last_emitted_importance`. Completed older days still quiet-replay.
-- [ ] AC-02: After the clock is closed, that same day’s **completed** `1Day` bar may emit through the existing daily detector.
-- [ ] AC-03: A second backfill in the same open session with a *different* running daily close does not create a new daily event or escalate solely because the running close moved. (Regression: TSLA 339.77 → 343.77 vs SPY.)
-- [ ] AC-04: Prior close 450, today’s 09:30 open 480 (+6.67%) emits `session_gap` `UP` at `HIGH` once. A restart the same session does not research it again.
-- [ ] AC-05: A +2% gap does not emit. A −3% gap emits `DOWN` `MODERATE`. Friday close → Monday open uses the same rule.
-- [ ] AC-06: Starting after 09:30 the same day still evaluates the gap from the stored first regular-session minute and the prior completed daily close. Starting with only today’s minutes (no 61-bar hour history) still can emit `session_gap`.
-- [ ] AC-07: Milestone 3 fast/daily thresholds are unchanged. No news client, Discord, workers, or second socket. Tests use fakes and no network. Ruff, mypy, and pytest pass.
+- [x] AC-01: During a regular session, a fake REST `1Day` bar for **today** that would cross a daily threshold does **not** emit, does **not** create an event, and does **not** write daily `last_emitted_importance`. Completed older days still quiet-replay.
+- [x] AC-02: After the clock is closed, that same day’s **completed** `1Day` bar may emit through the existing daily detector.
+- [x] AC-03: A second backfill in the same open session with a *different* running daily close does not create a new daily event or escalate solely because the running close moved. (Regression: TSLA 339.77 → 343.77 vs SPY.)
+- [x] AC-04: Prior close 450, today’s 09:30 open 480 (+6.67%) emits `session_gap` `UP` at `HIGH` once. A restart the same session does not research it again.
+- [x] AC-05: A +2% gap does not emit. A −3% gap emits `DOWN` `MODERATE`. Friday close → Monday open uses the same rule.
+- [x] AC-06: Starting after 09:30 the same day still evaluates the gap from the stored first regular-session minute and the prior completed daily close. Starting with only today’s minutes (no 61-bar hour history) still can emit `session_gap`.
+- [x] AC-07: Milestone 3 fast/daily thresholds are unchanged. No news client, Discord, workers, or second socket. Tests use fakes and no network. Ruff, mypy, and pytest pass.
 
 ## Constraints
 

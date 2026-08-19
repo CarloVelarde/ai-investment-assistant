@@ -4,12 +4,12 @@
 
 ## Current focus
 
-**Spec 006 — Live session hardening** is next. Do not start Milestone 5 until 006 is complete and the Milestone 5 spec is approved.
+**Spec 006 — Live session hardening** is complete. **Milestone 5 — Live news and classification** is next but has not started; implementation waits for an approved Milestone 5 spec.
 
-The live socket (Milestone 4) and opt-in heartbeat / watch log ([spec 005](../specs/005-ops-visibility/SPEC.md)) are in. A 19 Aug 2026 live trial found two problems that must be fixed before news work. The spec states each issue and the replacement behavior:
+The live socket (Milestone 4), opt-in heartbeat / watch log ([spec 005](../specs/005-ops-visibility/SPEC.md)), and live-session hardening ([spec 006](../specs/006-live-session-hardening/SPEC.md)) are in. Spec 006 fixed two problems found by the 19 Aug 2026 live trial:
 
-1. Unfinished same-day prices were treated as the official close, so after-close daily rules fired while the market was still open.
-2. A jump from yesterday’s close to this morning’s open is not checked on purpose.
+1. Unfinished same-day prices are no longer treated as the official close, so after-close daily rules wait for a finished session.
+2. A dedicated `session_gap` rule now checks the prior completed regular close against the first regular-session minute’s open once per symbol per session.
 
 Details: [`specs/006-live-session-hardening/`](../specs/006-live-session-hardening/SPEC.md).
 
@@ -68,22 +68,24 @@ Add Alpaca market history and streaming behind the existing input boundary. Add 
 
 **Completed:** Settings, normalization, the market-data port, REST backfill, quiet replay, stream ingest, after-close daily, reconnect/gap fill, and stale-stream rules. `main` uses the live path when keys exist. Production REST and the trading clock use stdlib HTTP. Live mode opens **one** stock websocket (`wss://stream.data.alpaca.markets/v2/{feed}`), authenticates, subscribes the watchlist plus `SPY` to `bars` and `updatedBars`, and feeds completed minutes through the existing ingest path. The news socket is not opened.
 
-**Live trial (19 Aug 2026):** the socket, minute ingest, fast detector, heartbeat, and clean Ctrl+C behaved as specified. The two problems above are owned by [spec 006](../specs/006-live-session-hardening/SPEC.md), not by more socket tasks here.
+**Live trial (19 Aug 2026):** the socket, minute ingest, fast detector, heartbeat, and clean Ctrl+C behaved as specified. The unfinished-daily and session-gap follow-up was completed in [spec 006](../specs/006-live-session-hardening/SPEC.md), not by reopening socket tasks here.
 
 **Complete when:** a small watchlist reliably feeds normalized live and recovered bars through both market evaluation modes during regular market operation.
 
 ### Spec 006 — Live session hardening
 
-**Status:** Approved, not started
+**Status:** Complete
 
 **Spec:** [`specs/006-live-session-hardening/`](../specs/006-live-session-hardening/SPEC.md)
 
 Stop after-close daily rules from running on today’s still-moving price. Add a session-open gap rule that compares the last regular close to today’s regular open. Keep the existing fast and daily thresholds. Add no news client.
 
-**Complete when:**
+**Completed:**
 
 - `multi_day_move`, `drawdown_from_high`, and `relative_to_spy` run only after the regular session has closed, on finished daily bars. They do not run on today’s still-moving price, and a restart during the session does not change that story.
 - A move of 3% or more from the last regular close to today’s regular open emits `session_gap` once that session. A same-session restart does not research the same gap again.
+
+**Live verification (19 Aug 2026):** three starts against one SQLite database used real IEX history and stream minutes. Today’s moving daily rows stayed incomplete, `session_gap` evaluated once at the regular open, REST backfill filled a minute missed while stopped, later socket minutes continued in order, and restarts created no duplicate signals, research, or notifications.
 
 ### Milestone 5 — Live news and classification
 
