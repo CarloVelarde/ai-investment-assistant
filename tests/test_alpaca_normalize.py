@@ -88,8 +88,31 @@ def test_rest_daily_bar_ends_at_regular_session_close() -> None:
     assert bar.start_at == datetime(2026, 1, 20, 5, 0, tzinfo=UTC)
     assert bar.end_at == datetime(2026, 1, 20, 21, 0, tzinfo=UTC)
     assert bar.end_at == regular_session_close(bar.start_at)
+    assert bar.is_complete is True
     assert bar.feed == "sip"
     assert bar.bar_id == "bar:AMD:1Day:2026-01-20T05:00:00+00:00"
+
+
+def test_rest_daily_bar_is_unfinished_before_regular_close() -> None:
+    payload = {
+        "t": "2026-01-20T05:00:00Z",
+        "o": "100.00",
+        "h": "101.00",
+        "l": "84.00",
+        "c": "84.21",
+        "v": 1_000_000,
+    }
+
+    bar = market_bar_from_alpaca(
+        payload,
+        ticker="AMD",
+        timeframe=MarketTimeframe.ONE_DAY,
+        feed="iex",
+        retrieved_at=datetime(2026, 1, 20, 15, 25, tzinfo=UTC),
+    )
+
+    assert bar.end_at == datetime(2026, 1, 20, 21, 0, tzinfo=UTC)
+    assert bar.is_complete is False
 
 
 def test_daily_bar_close_follows_eastern_daylight_time() -> None:

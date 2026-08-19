@@ -22,6 +22,7 @@ from investment_assistant.market_data import (
     regular_session_close,
     regular_session_open,
     stream_minute_from_alpaca,
+    with_daily_completeness,
 )
 from investment_assistant.models import MarketBar, MarketTimeframe
 from investment_assistant.ops_log import watch
@@ -468,7 +469,9 @@ def _replay_bars(
     diagnostics: list[str] = []
     closed: list[str] = []
     persisted: list[str] = []
+    as_of = clock.now()
     for bar in _bars_in_evaluation_order(bars):
+        bar = with_daily_completeness(bar, as_of=as_of)
         _sync_clock(clock, bar.end_at)
         outcome = process_market_bar(
             storage=storage,
@@ -476,7 +479,7 @@ def _replay_bars(
             bar=bar,
             watchlist=watchlist,
             now=clock.now(),
-            emit_signals=bar.end_at >= cutoff,
+            emit_signals=_replay_may_emit(bar, cutoff=cutoff, as_of=as_of),
         )
         persisted.append(bar.bar_id)
         accepted.extend(outcome.accepted_signal_ids)
@@ -488,6 +491,17 @@ def _replay_bars(
         closed_event_ids=tuple(closed),
         persisted_bar_ids=tuple(persisted),
     )
+
+
+def _replay_may_emit(
+    bar: MarketBar,
+    *,
+    cutoff: datetime,
+    as_of: datetime,
+) -> bool:
+    """Return True when a replayed bar may send signals to the event manager."""
+
+    return bar.is_complete and cutoff <= bar.end_at <= as_of
 
 
 def _bars_in_evaluation_order(bars: tuple[MarketBar, ...]) -> tuple[MarketBar, ...]:
