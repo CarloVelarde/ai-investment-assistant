@@ -2,7 +2,7 @@
 
 **Document status:** Approved
 
-**Execution status:** In progress
+**Execution status:** Complete
 
 This is the active slice. Do not start Milestone 5 until these tasks are complete.
 
@@ -12,7 +12,7 @@ This is the active slice. Do not start Milestone 5 until these tasks are complet
 - [x] 2. Issue 1: prove a second backfill in the same open session with a moved still-moving close does not create or escalate a daily event (TSLA vs `SPY` shape). Prove that after the clock is closed, the finished today daily bar may emit.
 - [x] 3. Issue 2: add `session_gap` / `SESSION_OPEN` (3% / 5% / 8%, rearm 1.5%, no volume dampen). Unit-test +6.67% → HIGH UP, +2% quiet, −3% → MODERATE DOWN, Friday close → Monday open.
 - [x] 4. Issue 2: run the gap check once per symbol per session after backfill and/or on the first regular-session minute. Prove a 10:25 start still fires from the stored 09:30 open, and a same-session restart does not research again. Wire it on the live path only; offline fixture mode stays as it is unless a tiny fixture is needed for the unit tests.
-- [ ] 5. Confirm Milestone 3 fast/daily thresholds are unchanged; no news client, Discord, workers, or second socket; update `TASKS.md`; run all repository checks.
+- [x] 5. Confirm Milestone 3 fast/daily thresholds are unchanged; no news client, Discord, workers, or second socket; update `TASKS.md`; run all repository checks.
 
 ## Acceptance coverage
 
