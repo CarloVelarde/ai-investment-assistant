@@ -25,10 +25,21 @@ Requires Python 3.14 and [`uv`](https://docs.astral.sh/uv/):
 
 ```bash
 uv sync
+cp .env.example .env
 uv run ai-investment-assistant
 ```
 
-Copy `.env.example` to `.env` and fill in Alpaca keys only if you want the live watch. Missing keys keep the offline fixture demo. Live news classification also needs `INVESTMENT_ASSISTANT_OPENAI_API_KEY`; without it the app still watches the market and stores news, but it does not call the classifier.
+Edit `.env` before a live run. Never commit `.env`.
+
+| Variable | Needed for | If blank |
+| --- | --- | --- |
+| `INVESTMENT_ASSISTANT_ALPACA_API_KEY_ID` and `INVESTMENT_ASSISTANT_ALPACA_API_SECRET_KEY` | Live market history, the stock socket, and Alpaca news retrieval | Offline fixture demo only |
+| `INVESTMENT_ASSISTANT_OPENAI_API_KEY` | Live news classification (whether a stored article becomes a news signal) | News is still fetched and saved; every candidate is deferred and no news event is created |
+| `INVESTMENT_ASSISTANT_WATCHLIST` | Which names to watch (required in live mode) | Live start is rejected |
+
+Create an OpenAI key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) and paste it into `INVESTMENT_ASSISTANT_OPENAI_API_KEY`. Do that before a live news check; without it the app will not classify articles.
+
+Alpaca keys come from your Alpaca account. Default feed is IEX.
 
 Default logs are quiet JSON at `INFO`. Two optional switches do not change that default:
 

@@ -83,10 +83,11 @@ That classifier only answers whether an article is worth turning into a **news s
 
 Significant news — good or bad — may create an event alone or enrich an existing market episode. Examples that can qualify if classified significant include earnings misses **and** earnings beats, investigations, product recalls, expansions, and acquisitions. Rejected or insignificant news creates no event or cooldown.
 
-Live news uses the structured classifier and needs an OpenAI key. Without that
-key, articles are still stored and market watch continues, but classification is
-deferred. The offline fixture path still matches a few negative phrases so older
-demos stay runnable.
+Live news uses the structured classifier and requires
+`INVESTMENT_ASSISTANT_OPENAI_API_KEY` in `.env`. Without that key, articles are
+still stored and market watch continues, but every classification is deferred
+and no news signal is created. The offline fixture path still matches a few
+negative phrases so older demos stay runnable.
 
 ### Event management
 
