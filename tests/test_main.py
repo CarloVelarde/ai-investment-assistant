@@ -354,8 +354,9 @@ def test_main_reconnects_when_the_stock_stream_drops(tmp_path: Path) -> None:
     transport = FakeStockStreamTransport(incoming=_handshake_frames())
     transport.queue_disconnect()
     transport.push_frames(*_handshake_frames())
+    http = ScriptedHistoryHttp()
     provider = AlpacaMarketData(
-        http=ScriptedHistoryHttp(),
+        http=http,
         clock=SteppingClock(datetime(2026, 2, 2, 15, 31, tzinfo=UTC)),
         feed="iex",
         sleeper=lambda _seconds: None,
@@ -384,6 +385,7 @@ def test_main_reconnects_when_the_stock_stream_drops(tmp_path: Path) -> None:
     assert "reconnected stock stream" in result.diagnostics
     assert transport.connect_count == 2
     assert transport.subscribe_calls == [("TSLA", "SPY"), ("TSLA", "SPY")]
+    assert http.requests == 4
 
 
 def test_env_example_documents_live_settings_without_secrets() -> None:

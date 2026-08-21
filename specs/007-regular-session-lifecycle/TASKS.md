@@ -1,10 +1,10 @@
 # Tasks: Regular Session Lifecycle Correction
 
-**Document status:** Approved
+**Document status:** Complete
 
-**Execution status:** In progress — Tasks 1 and 2 complete
+**Execution status:** Complete
 
-Milestone 5 remains not started until this corrective slice is implemented and
+Milestone 5 remains not started. This corrective slice is implemented and
 validated.
 
 ## Tasks
@@ -19,16 +19,16 @@ validated.
   and allow a closed start to connect at the next open. Use explicit connection
   state, do not call the auto-opening iterator while closed, and avoid a busy
   loop. Add fake transition and closed-start tests.
-- [ ] 3. Run one REST minute gap fill immediately after an open-session
+- [x] 3. Run one REST minute gap fill immediately after an open-session
   initial subscription. Do not duplicate the reconnect path’s existing gap fill.
   Prove a minute completed during startup is recovered and overlap with a
   buffered stream frame does not duplicate bars, signals, research, or
   notification.
-- [ ] 4. Allow the latest completed daily session to emit once during startup
+- [x] 4. Allow the latest completed daily session to emit once during startup
   recovery even after the calendar date changes. Prove next-morning and weekend
   catch-up, same-bar restart quiet, and no late prior-session fast or session-gap
   signal.
-- [ ] 5. Run focused restart and session-transition dry runs, update the owning
+- [x] 5. Run focused restart and session-transition dry runs, update the owning
   documents to completed status, confirm thresholds and event-manager behavior
   are unchanged, and run all repository checks.
 

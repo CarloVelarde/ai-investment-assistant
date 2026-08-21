@@ -116,6 +116,11 @@ def backfill_and_replay(
             end=minute_end,
         ),
     )
+    daily_emit_bar_ids = _latest_completed_daily_bar_ids(
+        fetched,
+        watchlist=frozenset(symbols),
+        as_of=now,
+    )
     return _replay_bars(
         storage=storage,
         manager=manager,
@@ -123,6 +128,7 @@ def backfill_and_replay(
         watchlist=frozenset(symbols),
         clock=clock,
         cutoff=cutoff,
+        daily_emit_bar_ids=daily_emit_bar_ids,
     )
 
 
@@ -482,6 +488,7 @@ def _replay_bars(
     watchlist: frozenset[str],
     clock: Clock,
     cutoff: datetime,
+    daily_emit_bar_ids: frozenset[str] = frozenset(),
 ) -> LiveIngestResult:
     accepted: list[str] = []
     diagnostics: list[str] = []
@@ -503,7 +510,12 @@ def _replay_bars(
             bar=bar,
             watchlist=watchlist,
             now=clock.now(),
-            emit_signals=_replay_may_emit(bar, cutoff=cutoff, as_of=as_of),
+            emit_signals=_replay_may_emit(
+                bar,
+                cutoff=cutoff,
+                as_of=as_of,
+                daily_emit_bar_ids=daily_emit_bar_ids,
+            ),
         )
         persisted.append(bar.bar_id)
         accepted.extend(outcome.accepted_signal_ids)
@@ -533,10 +545,41 @@ def _replay_may_emit(
     *,
     cutoff: datetime,
     as_of: datetime,
+    daily_emit_bar_ids: frozenset[str],
 ) -> bool:
     """Return True when a replayed bar may send signals to the event manager."""
 
-    return bar.is_complete and cutoff <= bar.end_at <= as_of
+    if not bar.is_complete or bar.end_at > as_of:
+        return False
+    if bar.timeframe is MarketTimeframe.ONE_DAY and bar.bar_id in daily_emit_bar_ids:
+        return True
+    return cutoff <= bar.end_at
+
+
+def _latest_completed_daily_bar_ids(
+    bars: tuple[MarketBar, ...],
+    *,
+    watchlist: frozenset[str],
+    as_of: datetime,
+) -> frozenset[str]:
+    latest_by_ticker: dict[str, MarketBar] = {}
+    for original in bars:
+        if (
+            original.timeframe is not MarketTimeframe.ONE_DAY
+            or original.ticker not in watchlist
+        ):
+            continue
+        bar = with_daily_completeness(original, as_of=as_of)
+        if not bar.is_complete or bar.end_at > as_of:
+            continue
+        previous = latest_by_ticker.get(bar.ticker)
+        if previous is None or (bar.end_at, bar.start_at, bar.bar_id) > (
+            previous.end_at,
+            previous.start_at,
+            previous.bar_id,
+        ):
+            latest_by_ticker[bar.ticker] = bar
+    return frozenset(bar.bar_id for bar in latest_by_ticker.values())
 
 
 def _bars_in_evaluation_order(bars: tuple[MarketBar, ...]) -> tuple[MarketBar, ...]:

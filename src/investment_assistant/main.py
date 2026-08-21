@@ -19,6 +19,7 @@ from investment_assistant.live_ingest import (
     StreamHealth,
     backfill_and_replay,
     diagnose_stream_health,
+    fill_minute_gap,
     ingest_stream_minutes,
     reconnect_stream,
     recover_stale_stream,
@@ -185,12 +186,25 @@ def run_live_session(
                 if not stream_connected:
                     stream_connected = _open_stock_stream(provider)
                     if stream_connected:
+                        handoff = fill_minute_gap(
+                            storage=storage,
+                            manager=manager,
+                            provider=provider,
+                            watchlist=watchlist,
+                            clock=clock,
+                        )
+                        latest = _combine(latest, handoff)
                         health.reset(now=clock.now())
                         watch(
                             "Stock stream ready",
                             url=getattr(provider, "stock_stream_url", None),
                             symbols=",".join(watchlist),
                             channels="bars,updatedBars",
+                        )
+                        watch(
+                            "Post-subscription minute gap filled",
+                            bars=len(handoff.persisted_bar_ids),
+                            accepted=len(handoff.accepted_signal_ids),
                         )
                 if stream_connected:
                     stream = ingest_stream_minutes(

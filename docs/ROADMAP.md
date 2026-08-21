@@ -4,9 +4,9 @@
 
 ## Current focus
 
-**Spec 007 — Regular session lifecycle correction** is approved and not started.
-It is the final corrective slice before **Milestone 5 — Live news and
-classification**, which remains not started.
+**Spec 007 — Regular session lifecycle correction** is complete.
+**Milestone 5 — Live news and classification** is now the next planned slice and
+remains not started.
 
 The live socket (Milestone 4), opt-in heartbeat / watch log ([spec 005](../specs/005-ops-visibility/SPEC.md)), and live-session hardening ([spec 006](../specs/006-live-session-hardening/SPEC.md)) are in. Spec 006 fixed two problems found by the 19 Aug 2026 live trial:
 
@@ -19,7 +19,7 @@ Follow-up restart analysis found three remaining correctness gaps in the live
 market loop: extended-hours minutes can enter regular fast history, the stock
 socket opens while the regular session is closed, and a missed daily scan can be
 lost when the first restart occurs on a later date. [Spec 007](../specs/007-regular-session-lifecycle/SPEC.md)
-addresses those gaps and the small startup REST-to-stream handoff window without
+closed those gaps and the small startup REST-to-stream handoff window without
 adding a scheduler, calendar service, or extended-hours product.
 
 ## Milestones
@@ -98,7 +98,7 @@ Stop after-close daily rules from running on today’s still-moving price. Add a
 
 ### Spec 007 — Regular session lifecycle correction
 
-**Status:** Approved; implementation not started
+**Status:** Complete
 
 **Spec:** [`specs/007-regular-session-lifecycle/`](../specs/007-regular-session-lifecycle/SPEC.md)
 
@@ -114,6 +114,11 @@ Finish the existing live market lifecycle before adding news:
 
 This correction keeps one process and the existing detector/event rules. It adds
 no news client, exchange calendar, worker, second socket, or extended-hours rule.
+
+**Completed:** Regular-only minute ingest and bounded detector history, a
+provider-session-aware socket lifecycle, socket-independent recovery and pending
+work, one post-subscription REST handoff fill, and latest-completed-daily catch-up
+are covered by deterministic restart and transition tests.
 
 ### Milestone 5 — Live news and classification
 

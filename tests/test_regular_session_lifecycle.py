@@ -7,13 +7,14 @@ from pathlib import Path
 
 from pydantic import SecretStr
 
-from investment_assistant.clock import SteppingClock
+from investment_assistant.clock import FixedClock, SteppingClock
 from investment_assistant.config import Settings
 from investment_assistant.main import main
 from investment_assistant.market_data import (
     FakeMarketData,
     HistoryPage,
     MarketSession,
+    StreamEventKind,
     StreamMinute,
 )
 from investment_assistant.market_metrics import RULE_ABRUPT_MOVE, RULE_MULTI_DAY_MOVE
@@ -43,8 +44,13 @@ class RecordingMarketData(FakeMarketData):
 
     holds_stock_stream = True
 
-    def __init__(self, *, history: Sequence[MarketBar]) -> None:
-        super().__init__(history=history, session=CLOSED_SESSION)
+    def __init__(
+        self,
+        *,
+        history: Sequence[MarketBar],
+        session: MarketSession = CLOSED_SESSION,
+    ) -> None:
+        super().__init__(history=history, session=session)
         self.open_count = 0
         self.close_count = 0
         self.iterator_count = 0
@@ -80,6 +86,25 @@ class RecordingMarketData(FakeMarketData):
     def iter_stream_minutes(self) -> Iterator[StreamMinute]:
         self.iterator_count += 1
         yield from super().iter_stream_minutes()
+
+
+class HandoffMarketData(RecordingMarketData):
+    """Make one completed minute visible only after stream subscription."""
+
+    def __init__(self, *, history: Sequence[MarketBar], crossing: MarketBar) -> None:
+        open_session = MarketSession(
+            is_open=True,
+            timestamp=crossing.end_at,
+            next_open=datetime(2026, 2, 3, 14, 30, tzinfo=UTC),
+            next_close=datetime(2026, 2, 2, 21, 0, tzinfo=UTC),
+        )
+        super().__init__(history=history, session=open_session)
+        self._crossing = crossing
+
+    def open_stock_stream(self) -> None:
+        super().open_stock_stream()
+        self.add_history(self._crossing)
+        self.push_stream(StreamMinute(StreamEventKind.BAR, self._crossing))
 
 
 def _daily(day: date, close: Decimal) -> MarketBar:
@@ -188,3 +213,68 @@ def test_after_close_restart_recovers_and_processes_without_socket(
         }
 
     assert rules == {RULE_ABRUPT_MOVE, RULE_MULTI_DAY_MOVE}
+
+
+def test_post_subscription_gap_fill_closes_startup_handoff_once(
+    tmp_path: Path,
+) -> None:
+    baseline = [_minute(index, Decimal("100")) for index in range(60)]
+    crossing = _minute(60, Decimal("97"))
+    provider = HandoffMarketData(history=baseline, crossing=crossing)
+    database_path = tmp_path / "startup-handoff.sqlite3"
+    research_updates: list[int] = []
+    notifications: list[int] = []
+
+    def research(event: Event, signals: tuple[Signal, ...]) -> ResearchReport:
+        research_updates.append(event.current_update)
+        return create_fake_research_report(event, signals)
+
+    result = main(
+        settings=Settings(
+            alpaca_api_key_id="test-key-id",
+            alpaca_api_secret_key=SecretStr("test-secret"),
+            watchlist="TSLA",
+            database_path=database_path,
+        ),
+        provider=provider,
+        clock=FixedClock(crossing.end_at),
+        loop=False,
+        sleeper=lambda _seconds: None,
+        researcher=research,
+        notifier=lambda event, _report: notifications.append(event.current_update),
+    )
+
+    assert result is not None
+    assert provider.open_count == 1
+    assert provider.iterator_count == 1
+    assert research_updates == [1]
+    assert notifications == [1]
+    minute_requests = [
+        request
+        for request in provider.history_requests
+        if request[0] is MarketTimeframe.ONE_MINUTE
+    ]
+    assert minute_requests == [
+        (
+            MarketTimeframe.ONE_MINUTE,
+            SESSION_OPEN,
+            crossing.end_at,
+        ),
+        (
+            MarketTimeframe.ONE_MINUTE,
+            baseline[-1].end_at,
+            crossing.end_at,
+        ),
+    ]
+
+    with SQLiteStorage(database_path) as storage:
+        bars = storage.list_market_bars("TSLA", MarketTimeframe.ONE_MINUTE)
+        events = storage.list_events()
+        signals = storage.list_signals(events[0].event_id)
+
+    assert len(bars) == 61
+    assert bars[-1] == crossing
+    assert len(events) == 1
+    assert len(signals) == 1
+    assert isinstance(signals[0], MarketSignal)
+    assert signals[0].rule == RULE_ABRUPT_MOVE

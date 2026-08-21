@@ -1,6 +1,6 @@
 # Feature Specification: Regular Session Lifecycle Correction
 
-**Document status:** Approved
+**Document status:** Complete
 
 ## Purpose
 
@@ -146,27 +146,27 @@ prior-session `abrupt_move`.
 
 ## Acceptance criteria
 
-- [ ] AC-01: A REST or stream minute starting at 15:59 ET is retained and may
+- [x] AC-01: A REST or stream minute starting at 15:59 ET is retained and may
   reach the fast detector. Minutes starting at 16:00 ET or outside regular hours
   are not retained, evaluated, or written into detector state.
-- [ ] AC-02: Extended-hours minute rows already stored in SQLite cannot satisfy
+- [x] AC-02: Extended-hours minute rows already stored in SQLite cannot satisfy
   the 61-bar fast lookback or change an `abrupt_move` result at the next regular
   open.
-- [ ] AC-03: A 19:00 ET same-day restart REST-fills 09:30–16:00, recovers missed
+- [x] AC-03: A 19:00 ET same-day restart REST-fills 09:30–16:00, recovers missed
   qualifying fast and completed daily signals, keeps an already-evaluated
   `session_gap` quiet, processes eligible events, and makes no socket connection.
-- [ ] AC-04: A closed-session start remains running without a socket, opens one
+- [x] AC-04: A closed-session start remains running without a socket, opens one
   socket when the fake provider transitions open, and closes without reconnecting
   when the provider transitions closed.
-- [ ] AC-05: A minute completed between the startup REST snapshot and socket
+- [x] AC-05: A minute completed between the startup REST snapshot and socket
   subscription is recovered by one post-subscription REST gap fill. Overlap with
   a buffered stream frame does not duplicate signals or research.
-- [ ] AC-06: On a next-morning or weekend restart, the latest completed daily bar
+- [x] AC-06: On a next-morning or weekend restart, the latest completed daily bar
   may emit once when it has not been evaluated. A same-bar restart stays quiet,
   and prior-session fast and session-gap rules do not late-fire.
-- [ ] AC-07: Pending durable event work can complete when the session is closed
+- [x] AC-07: Pending durable event work can complete when the session is closed
   and does not depend on opening a stock socket.
-- [ ] AC-08: Existing market thresholds and event-manager rules are unchanged.
+- [x] AC-08: Existing market thresholds and event-manager rules are unchanged.
   No extended-hours feature, calendar dependency, news client, Discord adapter,
   worker, or second socket is added. Ruff, mypy, and pytest pass.
 
