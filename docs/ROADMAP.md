@@ -4,7 +4,9 @@
 
 ## Current focus
 
-**Spec 006 — Live session hardening** is complete. **Milestone 5 — Live news and classification** is next but has not started; implementation waits for an approved Milestone 5 spec.
+**Spec 007 — Regular session lifecycle correction** is approved and not started.
+It is the final corrective slice before **Milestone 5 — Live news and
+classification**, which remains not started.
 
 The live socket (Milestone 4), opt-in heartbeat / watch log ([spec 005](../specs/005-ops-visibility/SPEC.md)), and live-session hardening ([spec 006](../specs/006-live-session-hardening/SPEC.md)) are in. Spec 006 fixed two problems found by the 19 Aug 2026 live trial:
 
@@ -12,6 +14,13 @@ The live socket (Milestone 4), opt-in heartbeat / watch log ([spec 005](../specs
 2. A dedicated `session_gap` rule now checks the prior completed regular close against the first regular-session minute’s open once per symbol per session.
 
 Details: [`specs/006-live-session-hardening/`](../specs/006-live-session-hardening/SPEC.md).
+
+Follow-up restart analysis found three remaining correctness gaps in the live
+market loop: extended-hours minutes can enter regular fast history, the stock
+socket opens while the regular session is closed, and a missed daily scan can be
+lost when the first restart occurs on a later date. [Spec 007](../specs/007-regular-session-lifecycle/SPEC.md)
+addresses those gaps and the small startup REST-to-stream handoff window without
+adding a scheduler, calendar service, or extended-hours product.
 
 ## Milestones
 
@@ -86,6 +95,25 @@ Stop after-close daily rules from running on today’s still-moving price. Add a
 - A move of 3% or more from the last regular close to today’s regular open emits `session_gap` once that session. A same-session restart does not research the same gap again.
 
 **Live verification (19 Aug 2026):** three starts against one SQLite database used real IEX history and stream minutes. Today’s moving daily rows stayed incomplete, `session_gap` evaluated once at the regular open, REST backfill filled a minute missed while stopped, later socket minutes continued in order, and restarts created no duplicate signals, research, or notifications.
+
+### Spec 007 — Regular session lifecycle correction
+
+**Status:** Approved; implementation not started
+
+**Spec:** [`specs/007-regular-session-lifecycle/`](../specs/007-regular-session-lifecycle/SPEC.md)
+
+Finish the existing live market lifecycle before adding news:
+
+- Retain and evaluate regular-session `1Min` bars only; extended-hours data must
+  not change the fast detector.
+- Use the stock socket only while the provider reports the regular session open.
+  REST recovery and pending event work remain available while closed.
+- Recover the most recent unprocessed completed daily scan after a next-day or
+  weekend restart, without late-firing old fast or session-gap signals.
+- Fill the small startup handoff between the REST snapshot and socket subscription.
+
+This correction keeps one process and the existing detector/event rules. It adds
+no news client, exchange calendar, worker, second socket, or extended-hours rule.
 
 ### Milestone 5 — Live news and classification
 
