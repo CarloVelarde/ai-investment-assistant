@@ -58,6 +58,12 @@ Product behavior is defined in [`PRODUCT.md`](PRODUCT.md), durable choices in [`
 
 Adapters retrieve market and news data and convert provider responses into validated internal records. Alpaca is the first live provider, but its SDK types must not enter core logic. Replay fixtures use the same downstream boundaries.
 
+For the MVP, news uses bounded Alpaca REST polling independently of the regular
+market session. A durable high-water mark on accepted article `updated_at` plus a small query
+overlap supports restart and request-failure recovery. A news websocket is deferred as a possible
+later optimization and, if added, must feed the same normalized article boundary;
+REST remains the recovery path (D-029).
+
 ### Detection
 
 Detection consumes normalized records and only produces signals; it does not enqueue research.
@@ -66,7 +72,7 @@ Detection consumes normalized records and only produces signals; it does not enq
 - A session-open gap check compares the prior completed regular close to today’s regular open (`session_gap`). It runs once per symbol per session.
 - The after-close daily market detector uses the same history to evaluate five- and twenty-trading-day movement, recent-high drawdown, and performance relative to `SPY`. Only **finished** daily bars count. Today’s still-moving price is not the day’s close.
 - Storage-backed detector reads are bounded to the rule lookback and evaluated as of the triggering bar. Older recovered bars cannot rewind newer detector state; delayed same-session `SPY` data can complete a relative rule that was skipped earlier.
-- News passes deterministic filters before a small structured classifier. The classifier may emit a significant news signal without a market signal. Significance is independent of direction: good news (for example an earnings beat or acquisition) and bad news can both qualify. Rejected articles never become signals. The current offline fixtures use a temporary negative-phrase rule until Milestone 5.
+- News passes deterministic filters before a small structured classifier. The classifier may emit a significant news signal without a market signal. Significance is independent of direction: good news (for example an earnings beat or acquisition) and bad news can both qualify. Rejected articles never become signals. Offline fixtures still use the temporary negative-phrase rule; live news does not.
 
 There is no separate weekly pipeline. Exact thresholds, severity boundaries, and rearm rules are feature-level decisions (Milestone 3 owns the first offline market set; spec 006 owns the session-open gap). Detector baseline state is durable for replay. Detection failures remain visible without crashing the application.
 
@@ -139,6 +145,10 @@ Lifecycle state survives restarts. Interrupted research resumes research, while 
 ## Reliability and security
 
 - Keep one live stock stream only while the provider reports the regular session open; detect stale sockets, reconnect, and backfill missing bars during that session. REST recovery, latest completed daily catch-up, and durable pending work do not require the socket.
+- Poll news through bounded REST requests while the application runs, including
+  outside regular market hours. Persist accepted articles before advancing the
+  retrieval high-water mark, overlap requests safely, and deduplicate by stable
+  identity (D-029).
 - Persist event and notification state before irreversible actions.
 - Use stable identifiers and idempotent processing.
 - Retry transient failures with bounded backoff.
@@ -155,8 +165,9 @@ Lifecycle state survives restarts. Interrupted research resumes research, while 
 - [Durable event foundation](../specs/002-durable-event-foundation/SPEC.md) added SQLite lifecycle state and independent market/news promotion through one event manager.
 - [Market history and offline detection](../specs/003-market-history-and-offline-detection/SPEC.md) added persisted bars, fast/daily deterministic market rules, detector rearm state, and open/closed market episodes.
 - [Live market data](../specs/004-live-market-data/SPEC.md) feeds those same bars from Alpaca REST history, after-close daily bars, and one stock websocket so completed regular-session minutes reach the fast detector in near real time.
-- [Ops visibility](../specs/005-ops-visibility/SPEC.md) adds an optional live heartbeat and a separate optional watch logger. It does not change market rules or replace Milestone 5.
+- [Ops visibility](../specs/005-ops-visibility/SPEC.md) adds an optional live heartbeat and a separate optional watch logger. It does not change market rules.
 - [Live session hardening](../specs/006-live-session-hardening/SPEC.md) completed the current live market loop: after-close daily rules run only on finished days, and `session_gap` compares the last regular close with today’s regular open once per symbol per session.
 - [Regular session lifecycle correction](../specs/007-regular-session-lifecycle/SPEC.md) completed the pre-Milestone-5 correction: isolate regular minutes, gate the socket by session state, close the startup history/stream handoff, and recover the latest missed daily scan.
+- [Live news and classification](../specs/008-live-news-classification/SPEC.md) added bounded Alpaca REST news polling, deterministic filters and budgets, and a small structured classifier on the news path only. Significant good, bad, or unclear news can create or enrich an event through the existing event manager.
 
-That path does not make news a gate for market events or market movement a gate for significant news. Later milestones add news classification that can accept significant good or bad news, real research, and Discord in roadmap order. Offline news detection today is a negative-phrase demo only.
+That path does not make news a gate for market events or market movement a gate for significant news. Later milestones add real research and Discord in roadmap order. Offline fixtures still use the negative-phrase demo.

@@ -1,10 +1,20 @@
 # AI Investment Assistant — MVP Source of Truth
 
-**Status:** Approved high-level product, architecture, and development strategy  
+**Status:** Archived historical planning snapshot
 **Last reviewed:** July 31, 2026  
 **Primary goal:** Build a reliable personal market-monitoring and event-research assistant for a long-term investor.
 
-**Document role:** This is the consolidated planning reference. It records the agreed product boundaries and enough architectural context to create the repository's smaller permanent documents. It is not meant to be loaded into every agent session after that split is complete.
+**Archive notice (August 21, 2026):** Current authority lives in the permanent
+documents under `docs/` and approved feature specs. In particular,
+[D-029](../DECISIONS.md) and [spec 008](../../specs/008-live-news-classification/SPEC.md)
+supersede this snapshot's initial news WebSocket-plus-REST proposal: the MVP uses
+REST-only news polling, while a news websocket remains a possible later
+optimization.
+
+**Document role:** This is the consolidated historical planning reference that
+was used to create the repository's smaller permanent documents. It is not
+authoritative after that split and is not meant to be loaded into every agent
+session.
 
 ---
 

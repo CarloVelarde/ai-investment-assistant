@@ -66,7 +66,11 @@ Completed daily bars come from REST `timeframe=1Day` after the regular close.
 
 ### News (Milestone 5 only)
 
-Same keys. Different socket: `wss://stream.data.alpaca.markets/v1beta1/news`. Fields include `id`, `headline`, `summary`, `symbols`, `source`, `created_at`. Do not open that socket here. Opening a second stock-feed connection on Basic can hit `406 connection limit exceeded`; news is another URL, but M5 should still assume one news socket and keep the stock socket.
+At the time of this completed plan, Milestone 5 was expected to use the separate
+news socket at `wss://stream.data.alpaca.markets/v1beta1/news` alongside REST.
+Do not open that socket here. [D-029](../../docs/DECISIONS.md) and
+[spec 008](../008-live-news-classification/PLAN.md) later selected REST-only news
+for the MVP and deferred the news socket as a possible later optimization.
 
 ## Key decisions
 
