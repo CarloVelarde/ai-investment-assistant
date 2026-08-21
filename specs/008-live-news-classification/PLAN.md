@@ -1,6 +1,6 @@
 # Implementation Plan: Live News and Classification
 
-**Document status:** Approved
+**Document status:** Complete
 
 ## Approach
 
@@ -109,8 +109,9 @@ Add the smallest schema that makes replay and failures explainable:
   successful classification.
 - A durable UTC-day call counter or classification-attempt query supplies the
   daily budget without a separate cache/service.
-- A small metadata/high-water record supplies incremental retrieval. Requests
-  overlap the stored timestamp and rely on stable article identity.
+- A small metadata/high-water record supplies incremental retrieval. The stored
+  cursor is the last accepted article's `updated_at`. Requests overlap that
+  timestamp and rely on stable article identity.
 
 Bump the SQLite version once and migrate existing databases without rewriting
 signals or event history. Existing offline `NewsSignal` rows remain readable.
@@ -209,6 +210,6 @@ classifies the other.
 
 ## Implementation gate
 
-This plan and its specification are approved. Implement tasks in order, keep the
-fixed transport, classifier, budget, and event-manager boundaries above, and
-record any later durable change before expanding scope.
+This slice is implemented. Keep the fixed transport, classifier, budget, and
+event-manager boundaries above, and record any later durable change before
+expanding scope.

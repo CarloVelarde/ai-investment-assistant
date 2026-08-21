@@ -23,6 +23,7 @@ _SETTINGS_ENV = (
     "INVESTMENT_ASSISTANT_ALPACA_API_SECRET_KEY",
     "INVESTMENT_ASSISTANT_ALPACA_FEED",
     "INVESTMENT_ASSISTANT_ALPACA_TRADING_URL",
+    "INVESTMENT_ASSISTANT_OPENAI_API_KEY",
     "INVESTMENT_ASSISTANT_WATCHLIST",
 )
 
@@ -58,6 +59,7 @@ def test_default_settings(
     assert settings.alpaca_api_secret_key.get_secret_value() == ""
     assert settings.alpaca_feed == "iex"
     assert settings.alpaca_trading_url == DEFAULT_ALPACA_TRADING_URL
+    assert settings.openai_api_key.get_secret_value() == ""
     assert settings.watchlist == ""
     assert settings.live_mode is False
 
@@ -205,6 +207,46 @@ def test_secret_is_not_exposed_in_repr_or_json(
     assert _SECRET not in rendered
     assert _SECRET not in str(settings.alpaca_api_secret_key)
     assert settings.alpaca_api_secret_key.get_secret_value() == _SECRET
+
+
+def test_news_watchlist_does_not_add_comparison_only_spy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _clear_settings_env(monkeypatch, tmp_path)
+    _set_live_keys(monkeypatch)
+    monkeypatch.setenv("INVESTMENT_ASSISTANT_WATCHLIST", "tsla, amd")
+
+    settings = Settings()
+
+    assert settings.news_watchlist() == ("TSLA", "AMD")
+    assert settings.watched_tickers() == ("TSLA", "AMD", "SPY")
+
+
+def test_explicit_spy_stays_on_the_news_watchlist(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _clear_settings_env(monkeypatch, tmp_path)
+    _set_live_keys(monkeypatch)
+    monkeypatch.setenv("INVESTMENT_ASSISTANT_WATCHLIST", "SPY,TSLA")
+
+    assert Settings().news_watchlist() == ("SPY", "TSLA")
+
+
+def test_openai_secret_is_not_exposed_in_repr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _clear_settings_env(monkeypatch, tmp_path)
+    openai_secret = "test-openai-secret-do-not-log"
+    monkeypatch.setenv("INVESTMENT_ASSISTANT_OPENAI_API_KEY", openai_secret)
+
+    settings = Settings()
+    rendered = f"{settings!r} {settings!s} {settings.model_dump(mode='json')}"
+
+    assert openai_secret not in rendered
+    assert settings.openai_api_key.get_secret_value() == openai_secret
 
 
 def test_watchlist_normalizes_tickers_and_includes_spy(

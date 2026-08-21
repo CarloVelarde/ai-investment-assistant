@@ -33,6 +33,7 @@ from types import TracebackType
 
 from investment_assistant.market_data import is_regular_session_minute
 from investment_assistant.models import (
+    ClassificationStatus,
     DetectorState,
     Event,
     EventStatus,
@@ -41,6 +42,10 @@ from investment_assistant.models import (
     MarketSignal,
     MarketTimeframe,
     MarketWindow,
+    NewsArticle,
+    NewsCategory,
+    NewsClassification,
+    NewsDirection,
     NewsSignal,
     NotificationAttempt,
     ProcessingFailure,
@@ -51,7 +56,7 @@ from investment_assistant.models import (
     SourceDetails,
 )
 
-DATABASE_VERSION = 3
+DATABASE_VERSION = 4
 
 _MARKET_HISTORY_TABLES = """
 CREATE TABLE IF NOT EXISTS market_bars (
@@ -84,6 +89,67 @@ CREATE TABLE IF NOT EXISTS detector_state (
     updated_at TEXT NOT NULL,
     last_evaluated_at TEXT,
     PRIMARY KEY (ticker, rule, window, direction)
+);
+"""
+
+_NEWS_TABLES = """
+CREATE TABLE IF NOT EXISTS news_articles (
+    article_id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    provider_article_id TEXT NOT NULL,
+    symbols TEXT NOT NULL,
+    headline TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    content TEXT NOT NULL,
+    url TEXT NOT NULL,
+    canonical_url TEXT NOT NULL,
+    source TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    retrieved_at TEXT NOT NULL,
+    content_fingerprint TEXT NOT NULL,
+    UNIQUE (provider, provider_article_id)
+);
+
+CREATE INDEX IF NOT EXISTS news_articles_canonical_url_idx
+    ON news_articles(canonical_url);
+CREATE INDEX IF NOT EXISTS news_articles_created_at_idx
+    ON news_articles(created_at);
+CREATE INDEX IF NOT EXISTS news_articles_updated_at_idx
+    ON news_articles(updated_at);
+
+CREATE TABLE IF NOT EXISTS news_classifications (
+    article_id TEXT NOT NULL REFERENCES news_articles(article_id),
+    ticker TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    relevant INTEGER CHECK (relevant IN (0, 1)),
+    category TEXT,
+    significant INTEGER CHECK (significant IN (0, 1)),
+    direction TEXT,
+    importance TEXT,
+    confidence TEXT,
+    rationale TEXT,
+    status TEXT NOT NULL,
+    attempted_at TEXT NOT NULL,
+    safe_error TEXT,
+    PRIMARY KEY (article_id, ticker, prompt_version, model_version)
+);
+
+CREATE INDEX IF NOT EXISTS news_classifications_attempted_idx
+    ON news_classifications(attempted_at);
+CREATE INDEX IF NOT EXISTS news_classifications_status_idx
+    ON news_classifications(status);
+
+CREATE TABLE IF NOT EXISTS news_retrieval_state (
+    provider TEXT PRIMARY KEY,
+    high_water_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS classifier_budget (
+    utc_day TEXT PRIMARY KEY,
+    call_count INTEGER NOT NULL CHECK (call_count >= 0)
 );
 """
 
@@ -175,6 +241,7 @@ CREATE TABLE IF NOT EXISTS failures (
 _SCHEMA = (
     _CORE_TABLES
     + _MARKET_HISTORY_TABLES
+    + _NEWS_TABLES
     + f"\nPRAGMA user_version = {DATABASE_VERSION};\n"
 )
 
@@ -219,7 +286,7 @@ class SQLiteStorage:
         """Create or upgrade the layout, or validate the current version."""
 
         version = self.database_version
-        if version not in (0, 1, 2, DATABASE_VERSION):
+        if version not in (0, 1, 2, 3, DATABASE_VERSION):
             raise ValueError(f"unsupported SQLite database version: {version}")
         if version == 0:
             self._run_script_atomically(_SCHEMA)
@@ -229,6 +296,9 @@ class SQLiteStorage:
             version = 2
         if version == 2:
             self._migrate_v2_to_v3()
+            version = 3
+        if version == 3:
+            self._migrate_v3_to_v4()
         self._run_script_atomically(_SCHEMA)
 
     @contextmanager
@@ -276,7 +346,10 @@ class SQLiteStorage:
                 self._connection.execute(
                     f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
                 )
-            self._connection.execute(f"PRAGMA user_version = {DATABASE_VERSION}")
+            self._connection.execute("PRAGMA user_version = 3")
+
+    def _migrate_v3_to_v4(self) -> None:
+        self._run_script_atomically(_NEWS_TABLES + "\nPRAGMA user_version = 4;\n")
 
     def _table_exists(self, table: str) -> bool:
         row = self._connection.execute(
@@ -818,6 +891,194 @@ class SQLiteStorage:
             ).fetchall()
         return tuple(_detector_state_from_row(row) for row in rows)
 
+    def save_news_article(self, article: NewsArticle) -> None:
+        """Insert or revise one normalized news article."""
+
+        with self.transaction():
+            self._write_news_article(article)
+
+    def get_news_article(self, article_id: str) -> NewsArticle | None:
+        """Reload one article by stable identity."""
+
+        row = self._connection.execute(
+            "SELECT * FROM news_articles WHERE article_id = ?",
+            (article_id,),
+        ).fetchone()
+        return None if row is None else _news_article_from_row(row)
+
+    def canonical_url_is_processed(
+        self,
+        canonical_url: str,
+        ticker: str,
+        *,
+        excluding_article_id: str,
+        prompt_version: str,
+        model_version: str,
+    ) -> bool:
+        """Return True when another article with this URL was already decided."""
+
+        row = self._connection.execute(
+            """
+            SELECT 1 FROM news_articles a
+            INNER JOIN news_classifications c
+                ON c.article_id = a.article_id
+            WHERE a.canonical_url = ?
+              AND a.article_id != ?
+              AND c.ticker = ?
+              AND c.prompt_version = ?
+              AND c.model_version = ?
+              AND c.status IN (?, ?, ?)
+            LIMIT 1
+            """,
+            (
+                canonical_url,
+                excluding_article_id,
+                ticker.strip().upper(),
+                prompt_version,
+                model_version,
+                ClassificationStatus.SUCCEEDED.value,
+                ClassificationStatus.FILTERED.value,
+                ClassificationStatus.FAILED.value,
+            ),
+        ).fetchone()
+        return row is not None
+
+    def list_news_articles_since(self, start: datetime) -> tuple[NewsArticle, ...]:
+        """Reload articles created or updated at or after ``start``, oldest first."""
+
+        bound = _timestamp(start)
+        rows = self._connection.execute(
+            """
+            SELECT * FROM news_articles
+            WHERE created_at >= ? OR updated_at >= ?
+            ORDER BY created_at, article_id
+            """,
+            (bound, bound),
+        ).fetchall()
+        return tuple(_news_article_from_row(row) for row in rows)
+
+    def save_news_classification(self, classification: NewsClassification) -> bool:
+        """Save a classification unless a successful one already exists."""
+
+        with self.transaction():
+            existing = self._connection.execute(
+                """
+                SELECT status FROM news_classifications
+                WHERE article_id = ? AND ticker = ?
+                  AND prompt_version = ? AND model_version = ?
+                """,
+                (
+                    classification.article_id,
+                    classification.ticker,
+                    classification.prompt_version,
+                    classification.model_version,
+                ),
+            ).fetchone()
+            if (
+                existing is not None
+                and str(existing["status"]) == ClassificationStatus.SUCCEEDED.value
+            ):
+                return False
+            self._write_news_classification(classification)
+        return True
+
+    def get_news_classification(
+        self,
+        article_id: str,
+        ticker: str,
+        *,
+        prompt_version: str,
+        model_version: str,
+    ) -> NewsClassification | None:
+        """Reload one article/ticker/prompt/model classification."""
+
+        row = self._connection.execute(
+            """
+            SELECT * FROM news_classifications
+            WHERE article_id = ? AND ticker = ?
+              AND prompt_version = ? AND model_version = ?
+            """,
+            (article_id, ticker.strip().upper(), prompt_version, model_version),
+        ).fetchone()
+        return None if row is None else _news_classification_from_row(row)
+
+    def list_news_classifications(
+        self,
+        article_id: str,
+    ) -> tuple[NewsClassification, ...]:
+        """Reload classifications for one article."""
+
+        rows = self._connection.execute(
+            """
+            SELECT * FROM news_classifications
+            WHERE article_id = ?
+            ORDER BY ticker, attempted_at
+            """,
+            (article_id,),
+        ).fetchall()
+        return tuple(_news_classification_from_row(row) for row in rows)
+
+    def get_news_high_water(self, provider: str) -> datetime | None:
+        """Return the durable news retrieval high-water mark."""
+
+        row = self._connection.execute(
+            "SELECT high_water_at FROM news_retrieval_state WHERE provider = ?",
+            (provider,),
+        ).fetchone()
+        return None if row is None else _datetime(row["high_water_at"])
+
+    def save_news_high_water(
+        self,
+        provider: str,
+        high_water_at: datetime,
+        *,
+        updated_at: datetime,
+    ) -> None:
+        """Persist the retrieval high-water mark after accepted articles."""
+
+        with self.transaction():
+            self._connection.execute(
+                """
+                INSERT INTO news_retrieval_state (
+                    provider, high_water_at, updated_at
+                ) VALUES (?, ?, ?)
+                ON CONFLICT(provider) DO UPDATE SET
+                    high_water_at = excluded.high_water_at,
+                    updated_at = excluded.updated_at
+                """,
+                (provider, _timestamp(high_water_at), _timestamp(updated_at)),
+            )
+
+    def classifier_call_count(self, utc_day: str) -> int:
+        """Return how many classifier calls have been recorded for a UTC day."""
+
+        row = self._connection.execute(
+            "SELECT call_count FROM classifier_budget WHERE utc_day = ?",
+            (utc_day,),
+        ).fetchone()
+        return 0 if row is None else int(row["call_count"])
+
+    def record_classifier_call(self, utc_day: str) -> int:
+        """Increment the UTC-day classifier counter and return the new count."""
+
+        with self.transaction():
+            self._connection.execute(
+                """
+                INSERT INTO classifier_budget (utc_day, call_count)
+                VALUES (?, 1)
+                ON CONFLICT(utc_day) DO UPDATE SET
+                    call_count = call_count + 1
+                """,
+                (utc_day,),
+            )
+            row = self._connection.execute(
+                "SELECT call_count FROM classifier_budget WHERE utc_day = ?",
+                (utc_day,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("classifier budget row missing after increment")
+        return int(row["call_count"])
+
     def _write_event(self, event: Event) -> None:
         self._connection.execute(
             """
@@ -1035,6 +1296,111 @@ class SQLiteStorage:
             ),
         )
 
+    def _write_news_article(self, article: NewsArticle) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO news_articles (
+                article_id, provider, provider_article_id, symbols, headline,
+                summary, content, url, canonical_url, source, created_at,
+                updated_at, retrieved_at, content_fingerprint
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(article_id) DO UPDATE SET
+                symbols = excluded.symbols,
+                headline = excluded.headline,
+                summary = excluded.summary,
+                content = excluded.content,
+                url = excluded.url,
+                canonical_url = excluded.canonical_url,
+                source = excluded.source,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at,
+                retrieved_at = excluded.retrieved_at,
+                content_fingerprint = excluded.content_fingerprint
+            WHERE excluded.retrieved_at >= news_articles.retrieved_at
+            """,
+            (
+                article.article_id,
+                article.provider,
+                article.provider_article_id,
+                json.dumps(list(article.symbols)),
+                article.headline,
+                article.summary,
+                article.content,
+                article.url,
+                article.canonical_url,
+                article.source,
+                _timestamp(article.created_at),
+                _timestamp(article.updated_at),
+                _timestamp(article.retrieved_at),
+                article.content_fingerprint,
+            ),
+        )
+
+    def _write_news_classification(self, classification: NewsClassification) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO news_classifications (
+                article_id, ticker, prompt_version, model_version, relevant,
+                category, significant, direction, importance, confidence,
+                rationale, status, attempted_at, safe_error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(article_id, ticker, prompt_version, model_version)
+            DO UPDATE SET
+                relevant = excluded.relevant,
+                category = excluded.category,
+                significant = excluded.significant,
+                direction = excluded.direction,
+                importance = excluded.importance,
+                confidence = excluded.confidence,
+                rationale = excluded.rationale,
+                status = excluded.status,
+                attempted_at = excluded.attempted_at,
+                safe_error = excluded.safe_error
+            WHERE news_classifications.status != ?
+            """,
+            (
+                classification.article_id,
+                classification.ticker,
+                classification.prompt_version,
+                classification.model_version,
+                (
+                    None
+                    if classification.relevant is None
+                    else int(classification.relevant)
+                ),
+                (
+                    None
+                    if classification.category is None
+                    else classification.category.value
+                ),
+                (
+                    None
+                    if classification.significant is None
+                    else int(classification.significant)
+                ),
+                (
+                    None
+                    if classification.direction is None
+                    else classification.direction.value
+                ),
+                (
+                    None
+                    if classification.importance is None
+                    else classification.importance.value
+                ),
+                (
+                    None
+                    if classification.confidence is None
+                    else str(classification.confidence)
+                ),
+                classification.rationale,
+                classification.status.value,
+                _timestamp(classification.attempted_at),
+                classification.safe_error,
+                ClassificationStatus.SUCCEEDED.value,
+            ),
+        )
+
     def _write_failure(self, failure: ProcessingFailure) -> None:
         self._connection.execute(
             """
@@ -1119,6 +1485,58 @@ def _detector_state_from_row(row: sqlite3.Row) -> DetectorState:
         updated_at=_datetime(row["updated_at"]),
         last_evaluated_at=_optional_datetime(row["last_evaluated_at"]),
     )
+
+
+def _news_article_from_row(row: sqlite3.Row) -> NewsArticle:
+    return NewsArticle(
+        provider=str(row["provider"]),
+        provider_article_id=str(row["provider_article_id"]),
+        symbols=_news_symbols(row["symbols"]),
+        headline=str(row["headline"]),
+        summary=str(row["summary"]),
+        content=str(row["content"]),
+        url=str(row["url"]),
+        canonical_url=str(row["canonical_url"]),
+        source=str(row["source"]),
+        created_at=_datetime(row["created_at"]),
+        updated_at=_datetime(row["updated_at"]),
+        retrieved_at=_datetime(row["retrieved_at"]),
+        content_fingerprint=str(row["content_fingerprint"]),
+    )
+
+
+def _news_classification_from_row(row: sqlite3.Row) -> NewsClassification:
+    category = _optional_text(row["category"])
+    direction = _optional_text(row["direction"])
+    importance = _optional_text(row["importance"])
+    confidence = _optional_text(row["confidence"])
+    relevant = row["relevant"]
+    significant = row["significant"]
+    return NewsClassification(
+        article_id=str(row["article_id"]),
+        ticker=str(row["ticker"]),
+        prompt_version=str(row["prompt_version"]),
+        model_version=str(row["model_version"]),
+        status=ClassificationStatus(str(row["status"])),
+        attempted_at=_datetime(row["attempted_at"]),
+        relevant=None if relevant is None else bool(relevant),
+        category=None if category is None else NewsCategory(category),
+        significant=None if significant is None else bool(significant),
+        direction=None if direction is None else NewsDirection(direction),
+        importance=None if importance is None else SignalImportance(importance),
+        confidence=None if confidence is None else float(confidence),
+        rationale=_optional_text(row["rationale"]),
+        safe_error=_optional_text(row["safe_error"]),
+    )
+
+
+def _news_symbols(value: object) -> tuple[str, ...]:
+    decoded: object = json.loads(str(value))
+    if not isinstance(decoded, list) or not all(
+        isinstance(item, str) for item in decoded
+    ):
+        raise ValueError("invalid stored news symbols")
+    return tuple(decoded)
 
 
 def _failure_from_row(row: sqlite3.Row) -> ProcessingFailure:

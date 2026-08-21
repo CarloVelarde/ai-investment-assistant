@@ -34,6 +34,38 @@ class SignalDirection(StrEnum):
     DOWN = "DOWN"
 
 
+class NewsCategory(StrEnum):
+    """Controlled event categories for structured news classification."""
+
+    EARNINGS = "EARNINGS"
+    GUIDANCE = "GUIDANCE"
+    MERGERS_ACQUISITIONS = "MERGERS_ACQUISITIONS"
+    REGULATORY_LEGAL = "REGULATORY_LEGAL"
+    PRODUCT_SAFETY = "PRODUCT_SAFETY"
+    MANAGEMENT = "MANAGEMENT"
+    FINANCING_CAPITAL = "FINANCING_CAPITAL"
+    OPERATIONS = "OPERATIONS"
+    MACRO_SECTOR = "MACRO_SECTOR"
+    OTHER = "OTHER"
+
+
+class NewsDirection(StrEnum):
+    """Classifier direction, including stories that are not clearly bullish or bearish."""
+
+    UP = "UP"
+    DOWN = "DOWN"
+    UNCLEAR = "UNCLEAR"
+
+
+class ClassificationStatus(StrEnum):
+    """Persisted outcome of one article/ticker classification attempt."""
+
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    FILTERED = "FILTERED"
+    DEFERRED = "DEFERRED"
+
+
 class MarketWindow(StrEnum):
     """Market horizons planned for the shared signal contract."""
 
@@ -179,6 +211,153 @@ class NewsRecord:
     summary: str
     published_at: datetime
     source: str
+
+
+@dataclass(frozen=True, slots=True)
+class NewsArticle:
+    """Provenance-complete live news article after provider normalization."""
+
+    provider: str
+    provider_article_id: str
+    symbols: tuple[str, ...]
+    headline: str
+    summary: str
+    content: str
+    url: str
+    canonical_url: str
+    source: str
+    created_at: datetime
+    updated_at: datetime
+    retrieved_at: datetime
+    content_fingerprint: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "provider", _non_blank(self.provider, "provider"))
+        object.__setattr__(
+            self,
+            "provider_article_id",
+            _non_blank(self.provider_article_id, "provider_article_id"),
+        )
+        object.__setattr__(
+            self,
+            "symbols",
+            tuple(_ticker(symbol) for symbol in self.symbols),
+        )
+        if not self.symbols:
+            raise ValueError("symbols must not be empty")
+        if len(set(self.symbols)) != len(self.symbols):
+            raise ValueError("symbols must not contain duplicates")
+        object.__setattr__(
+            self,
+            "headline",
+            _bounded_text(self.headline, "headline", MAX_NEWS_HEADLINE_CHARS),
+        )
+        object.__setattr__(
+            self,
+            "summary",
+            _bounded_optional_text(self.summary, "summary", MAX_NEWS_SUMMARY_CHARS),
+        )
+        object.__setattr__(
+            self,
+            "content",
+            _bounded_optional_text(self.content, "content", MAX_NEWS_CONTENT_CHARS),
+        )
+        object.__setattr__(self, "url", _non_blank(self.url, "url"))
+        object.__setattr__(
+            self,
+            "canonical_url",
+            _non_blank(self.canonical_url, "canonical_url"),
+        )
+        object.__setattr__(self, "source", _non_blank(self.source, "source"))
+        object.__setattr__(self, "created_at", _as_utc(self.created_at, "created_at"))
+        object.__setattr__(self, "updated_at", _as_utc(self.updated_at, "updated_at"))
+        object.__setattr__(
+            self,
+            "retrieved_at",
+            _as_utc(self.retrieved_at, "retrieved_at"),
+        )
+        object.__setattr__(
+            self,
+            "content_fingerprint",
+            _non_blank(self.content_fingerprint, "content_fingerprint"),
+        )
+
+    @property
+    def article_id(self) -> str:
+        """Return the stable identity used for idempotent article storage."""
+
+        return f"{self.provider}:{self.provider_article_id}"
+
+
+@dataclass(frozen=True, slots=True)
+class NewsClassification:
+    """One article/ticker classification attempt, including safe failures."""
+
+    article_id: str
+    ticker: str
+    prompt_version: str
+    model_version: str
+    status: ClassificationStatus
+    attempted_at: datetime
+    relevant: bool | None = None
+    category: NewsCategory | None = None
+    significant: bool | None = None
+    direction: NewsDirection | None = None
+    importance: SignalImportance | None = None
+    confidence: float | None = None
+    rationale: str | None = None
+    safe_error: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "article_id", _non_blank(self.article_id, "article_id")
+        )
+        object.__setattr__(self, "ticker", _ticker(self.ticker))
+        object.__setattr__(
+            self,
+            "prompt_version",
+            _non_blank(self.prompt_version, "prompt_version"),
+        )
+        object.__setattr__(
+            self,
+            "model_version",
+            _non_blank(self.model_version, "model_version"),
+        )
+        object.__setattr__(
+            self,
+            "attempted_at",
+            _as_utc(self.attempted_at, "attempted_at"),
+        )
+        if self.confidence is not None and (
+            not _is_number(self.confidence) or not 0.0 <= self.confidence <= 1.0
+        ):
+            raise ValueError("confidence must be between 0 and 1")
+        if self.rationale is not None:
+            object.__setattr__(
+                self,
+                "rationale",
+                _bounded_text(self.rationale, "rationale", MAX_NEWS_RATIONALE_CHARS),
+            )
+        if self.safe_error is not None:
+            object.__setattr__(
+                self,
+                "safe_error",
+                _bounded_text(self.safe_error, "safe_error", MAX_SAFE_ERROR_CHARS),
+            )
+        if self.status is ClassificationStatus.SUCCEEDED:
+            if (
+                self.relevant is None
+                or self.category is None
+                or self.significant is None
+                or self.direction is None
+                or self.importance is None
+                or self.confidence is None
+                or self.rationale is None
+            ):
+                raise ValueError("successful classification requires a complete result")
+        else:
+            if self.safe_error is None:
+                raise ValueError("unsuccessful classification requires safe_error")
 
 
 @dataclass(frozen=True, slots=True)
@@ -431,6 +610,13 @@ class ProcessingFailure:
         )
 
 
+MAX_NEWS_HEADLINE_CHARS = 500
+MAX_NEWS_SUMMARY_CHARS = 2000
+MAX_NEWS_CONTENT_CHARS = 4000
+MAX_NEWS_RATIONALE_CHARS = 500
+MAX_SAFE_ERROR_CHARS = 300
+
+
 def _validate_ohlcv(
     open_price: Decimal,
     high: Decimal,
@@ -461,6 +647,24 @@ def _non_blank(value: str, field_name: str) -> str:
     if not normalized:
         raise ValueError(f"{field_name} must not be blank")
     return normalized
+
+
+def _bounded_text(value: str, field_name: str, max_chars: int) -> str:
+    normalized = _non_blank(value, field_name)
+    if len(normalized) > max_chars:
+        raise ValueError(f"{field_name} must be at most {max_chars} characters")
+    return normalized
+
+
+def _bounded_optional_text(value: str, field_name: str, max_chars: int) -> str:
+    normalized = value.strip()
+    if len(normalized) > max_chars:
+        raise ValueError(f"{field_name} must be at most {max_chars} characters")
+    return normalized
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _ticker(value: str) -> str:

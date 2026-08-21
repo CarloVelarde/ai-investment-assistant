@@ -28,7 +28,7 @@ uv sync
 uv run ai-investment-assistant
 ```
 
-Copy `.env.example` to `.env` and fill in Alpaca keys only if you want the live watch. Missing keys keep the offline fixture demo.
+Copy `.env.example` to `.env` and fill in Alpaca keys only if you want the live watch. Missing keys keep the offline fixture demo. Live news classification also needs `INVESTMENT_ASSISTANT_OPENAI_API_KEY`; without it the app still watches the market and stores news, but it does not call the classifier.
 
 Default logs are quiet JSON at `INFO`. Two optional switches do not change that default:
 

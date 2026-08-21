@@ -1,38 +1,39 @@
 # Tasks: Live News and Classification
 
-**Document status:** Approved
+**Document status:** Complete
 
-**Implementation status:** Not started
+**Implementation status:** Complete
 
-Milestone 5 planning is approved. Implementation tasks 2–8 have not started.
+Milestone 5 is implemented and validated. Live smoke against Alpaca/OpenAI is
+opt-in (`uv run ai-investment-assistant` with keys) and is not part of pytest.
 
 ## Tasks
 
 - [x] 1. Resolve the REST-only transport, recovery-window, budget, model,
   confidence, category, and article-revision decisions. Record D-029 and approve
   `SPEC.md`, `PLAN.md`, and this task list.
-- [ ] 2. Add provenance-complete internal article/classification models and the
+- [x] 2. Add provenance-complete internal article/classification models and the
   backward-compatible SQLite migration, including durable classification status,
   budgets, and retrieval high-water state. Add migration and restart tests.
-- [ ] 3. Add the paginated Alpaca REST news boundary and normalization. Prove
+- [x] 3. Add the paginated Alpaca REST news boundary and normalization. Prove
   symbol/time parameters, oldest-first recovery, page caps, malformed-sibling
   isolation, retryable failures, and secret-safe diagnostics with a fake HTTP
   provider.
-- [ ] 4. Add deterministic explicit-watchlist, recency, required-field/source,
+- [x] 4. Add deterministic explicit-watchlist, recency, required-field/source,
   provider-ID, canonical-URL, and per-pass/day budget filtering. Prove rejected or
   deferred candidates make zero classifier calls.
-- [ ] 5. Add the classifier port, deterministic fake, and OpenAI Responses adapter
+- [x] 5. Add the classifier port, deterministic fake, and OpenAI Responses adapter
   with bounded input, no tools, `store=false`, pinned prompt/model provenance,
   strict structured output, validation, and safe retryable failure handling.
-- [ ] 6. Convert qualifying positive, negative, and unclear classifications into
+- [x] 6. Convert qualifying positive, negative, and unclear classifications into
   stable `NewsSignal` values and submit them through the unchanged event manager.
   Prove rejected classifications create no signal/event/cooldown and accepted
   news-only or related-news cases promote exactly once.
-- [ ] 7. Integrate bounded startup recovery and due polling into the existing live
+- [x] 7. Integrate bounded startup recovery and due polling into the existing live
   loop independently of market-session/socket state. Prove overlap, restart,
   classifier failure, stock failure, and pending work remain isolated and
   idempotent.
-- [ ] 8. Run focused offline and opt-in live smoke checks, update owning documents
+- [x] 8. Run focused offline and opt-in live smoke checks, update owning documents
   to completed status, confirm no market/event policy drift or later-milestone
   integration, and run all repository checks.
 

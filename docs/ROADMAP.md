@@ -4,24 +4,15 @@
 
 ## Current focus
 
-**Spec 007 — Regular session lifecycle correction** is complete.
-**Milestone 5 — Live news and classification** is approved and ready for
-implementation under [spec 008](../specs/008-live-news-classification/SPEC.md).
-Implementation remains not started.
+**Milestone 5 — Live news and classification** is complete under
+[spec 008](../specs/008-live-news-classification/SPEC.md).
+The next roadmap item is Milestone 6 — Research and reporting.
 
-The live socket (Milestone 4), opt-in heartbeat / watch log ([spec 005](../specs/005-ops-visibility/SPEC.md)), and live-session hardening ([spec 006](../specs/006-live-session-hardening/SPEC.md)) are in. Spec 006 fixed two problems found by the 19 Aug 2026 live trial:
-
-1. Unfinished same-day prices are no longer treated as the official close, so after-close daily rules wait for a finished session.
-2. A dedicated `session_gap` rule now checks the prior completed regular close against the first regular-session minute’s open once per symbol per session.
-
-Details: [`specs/006-live-session-hardening/`](../specs/006-live-session-hardening/SPEC.md).
-
-Follow-up restart analysis found three remaining correctness gaps in the live
-market loop: extended-hours minutes can enter regular fast history, the stock
-socket opens while the regular session is closed, and a missed daily scan can be
-lost when the first restart occurs on a later date. [Spec 007](../specs/007-regular-session-lifecycle/SPEC.md)
-closed those gaps and the small startup REST-to-stream handoff window without
-adding a scheduler, calendar service, or extended-hours product.
+The live market loop (Milestones 4, [006](../specs/006-live-session-hardening/SPEC.md),
+and [007](../specs/007-regular-session-lifecycle/SPEC.md)), opt-in heartbeat / watch
+log ([spec 005](../specs/005-ops-visibility/SPEC.md)), and REST news classification
+are in. Spec 007 finished regular-session isolation, socket lifecycle, daily
+catch-up, and the startup REST-to-stream handoff before this news slice.
 
 ## Milestones
 
@@ -130,13 +121,15 @@ qualified, and Ctrl+C stopped the process cleanly.
 
 ### Milestone 5 — Live news and classification
 
-**Status:** Approved; implementation not started
+**Status:** Complete
 
 **Spec:** [`specs/008-live-news-classification/`](../specs/008-live-news-classification/SPEC.md)
 
 Add bounded Alpaca REST news polling, deterministic relevance and duplicate filtering, classifier-call limits, and a small inexpensive structured AI classifier on the news path only. The classifier may mark an article significant whether the story is positive, negative, or unclear. Significant news may create an event alone or enrich and requeue an existing market episode; rejected news creates no event or cooldown. The classifier does not decide research or notification; the existing event manager still does. A news websocket is deferred as a possible post-MVP optimization if observed polling timeliness is inadequate.
 
 **Complete when:** significant news of either direction is processed once through the shared event manager without requiring a market trigger or researching every article.
+
+**Completed:** Bounded Alpaca REST news polling, deterministic watchlist/recency/source/identity/budget filters, and a small structured classifier on the news path only. Significant good, bad, or unclear news can create or enrich an event through the existing event manager. Rejected news creates no event or cooldown. The news websocket, real research, and Discord remain later work.
 
 ### Milestone 6 — Research and reporting
 

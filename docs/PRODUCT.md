@@ -72,13 +72,21 @@ For the MVP, retrieve Alpaca news through bounded REST polling while the local
 application is running, including outside regular market hours. A news websocket
 is a possible later optimization if observed polling timeliness is inadequate.
 
-Filter company news by watchlist relevance, recency, source, event category, duplicates, and classifier-call limits. Qualifying articles receive a small, inexpensive structured classification with relevance, category, likely significance, direction (positive, negative, or unclear), confidence, and rationale.
+Filter company news by the explicit user watchlist, recency, required source
+fields, exact article identity, canonical URL, and classifier-call limits.
+Comparison-only `SPY` added for market context is not classified unless the user
+configured it. Qualifying articles receive a small, inexpensive structured
+classification with relevance, category, likely significance, direction
+(positive, negative, or unclear), confidence, and rationale.
 
 That classifier only answers whether an article is worth turning into a **news signal**. It is not a second research model and it does not decide notification.
 
 Significant news — good or bad — may create an event alone or enrich an existing market episode. Examples that can qualify if classified significant include earnings misses **and** earnings beats, investigations, product recalls, expansions, and acquisitions. Rejected or insignificant news creates no event or cooldown.
 
-The current offline demo only matches a few negative phrases. That is a temporary fixture rule until Milestone 5.
+Live news uses the structured classifier and needs an OpenAI key. Without that
+key, articles are still stored and market watch continues, but classification is
+deferred. The offline fixture path still matches a few negative phrases so older
+demos stay runnable.
 
 ### Event management
 

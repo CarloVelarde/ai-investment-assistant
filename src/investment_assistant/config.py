@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     alpaca_api_secret_key: SecretStr = SecretStr("")
     alpaca_feed: Literal["iex", "sip"] = "iex"
     alpaca_trading_url: str = DEFAULT_ALPACA_TRADING_URL
+    openai_api_key: SecretStr = SecretStr("")
     watchlist: str = ""
 
     model_config = SettingsConfigDict(
@@ -73,7 +74,7 @@ class Settings(BaseSettings):
             return value.strip()
         return value
 
-    @field_validator("alpaca_api_secret_key", mode="before")
+    @field_validator("alpaca_api_secret_key", "openai_api_key", mode="before")
     @classmethod
     def _strip_secret(cls, value: object) -> object:
         if isinstance(value, str):
@@ -115,6 +116,18 @@ class Settings(BaseSettings):
         """Return the normalized live watchlist including SPY."""
 
         return resolve_live_watchlist(self.watchlist)
+
+    def news_watchlist(self) -> tuple[str, ...]:
+        """Return the explicit user watchlist used for news classification.
+
+        Comparison-only SPY is not added. SPY is included only when the user
+        configured it.
+        """
+
+        tickers = parse_watchlist(self.watchlist)
+        if not tickers:
+            raise ValueError("watchlist must not be blank")
+        return tickers
 
 
 @lru_cache

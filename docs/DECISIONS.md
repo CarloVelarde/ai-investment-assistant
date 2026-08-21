@@ -153,7 +153,7 @@ This refines D-005 and D-018:
 - A news article may be significant whether classification labels it positive (`UP`), negative (`DOWN`), or unclear. Earnings beats, expansions, and acquisitions are in scope if they pass significance; they are not discarded for being good news.
 - The inexpensive structured classifier is **news-path triage only**. It helps decide whether an article becomes a news signal. It does not judge market-rule signals and does not decide research or notification.
 - The event manager still decides whether a new or updated event needs work (research and, if that succeeds, notification).
-- Offline demo detection that matches only a few negative phrases is a temporary Milestone 1/2 fixture rule, not the product news policy. Milestone 5 replaces that rule.
+- Offline demo detection that matches only a few negative phrases is a temporary Milestone 1/2 fixture rule, not the product news policy. Milestone 5 live news uses the structured classifier; the phrase matcher remains only for offline fixtures.
 
 **Why:** Cost control belongs on the news firehose, not by ignoring positive stories. A second AI judge in front of every event would blur responsibilities and still miss market-only cases.
 

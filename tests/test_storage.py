@@ -7,6 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from investment_assistant.models import (
+    ClassificationStatus,
     DetectorState,
     Event,
     EventStatus,
@@ -15,6 +16,10 @@ from investment_assistant.models import (
     MarketSignal,
     MarketTimeframe,
     MarketWindow,
+    NewsArticle,
+    NewsCategory,
+    NewsClassification,
+    NewsDirection,
     NewsSignal,
     NotificationAttempt,
     ProcessingFailure,
@@ -408,3 +413,119 @@ def test_stale_or_incomplete_update_cannot_regress_completed_bar(
         storage.save_market_bar(later_incomplete)
 
         assert storage.get_market_bar(WATCHLIST_BAR.bar_id) == WATCHLIST_BAR
+
+
+NEWS_ARTICLE = NewsArticle(
+    provider="alpaca",
+    provider_article_id="24843171",
+    symbols=("TSLA", "AMD"),
+    headline="Tesla reports record deliveries",
+    summary="Vehicle deliveries rose.",
+    content="Tesla said quarterly deliveries increased.",
+    url="https://www.benzinga.com/news/tesla-deliveries",
+    canonical_url="https://www.benzinga.com/news/tesla-deliveries",
+    source="benzinga",
+    created_at=OCCURRED_AT,
+    updated_at=OCCURRED_AT + timedelta(seconds=1),
+    retrieved_at=OCCURRED_AT + timedelta(minutes=1),
+    content_fingerprint="d" * 64,
+)
+NEWS_CLASSIFICATION = NewsClassification(
+    article_id=NEWS_ARTICLE.article_id,
+    ticker="TSLA",
+    prompt_version="news-classifier-v1",
+    model_version="gpt-5.4-nano-2026-03-17",
+    status=ClassificationStatus.SUCCEEDED,
+    attempted_at=OCCURRED_AT + timedelta(minutes=2),
+    relevant=True,
+    category=NewsCategory.EARNINGS,
+    significant=True,
+    direction=NewsDirection.UP,
+    importance=SignalImportance.HIGH,
+    confidence=0.91,
+    rationale="Deliveries beat with a raised outlook.",
+)
+
+
+def test_news_article_and_classification_survive_reopen(tmp_path: Path) -> None:
+    database_path = tmp_path / "news-state.sqlite3"
+    with SQLiteStorage(database_path) as storage:
+        storage.initialize()
+        storage.save_news_article(NEWS_ARTICLE)
+        storage.save_news_classification(NEWS_CLASSIFICATION)
+        storage.save_news_high_water(
+            "alpaca",
+            NEWS_ARTICLE.created_at,
+            updated_at=NEWS_ARTICLE.retrieved_at,
+        )
+        storage.record_classifier_call(OCCURRED_AT.date().isoformat())
+
+    with SQLiteStorage(database_path) as reopened:
+        reopened.initialize()
+        assert reopened.get_news_article(NEWS_ARTICLE.article_id) == NEWS_ARTICLE
+        assert (
+            reopened.get_news_classification(
+                NEWS_ARTICLE.article_id,
+                "TSLA",
+                prompt_version="news-classifier-v1",
+                model_version="gpt-5.4-nano-2026-03-17",
+            )
+            == NEWS_CLASSIFICATION
+        )
+        assert reopened.get_news_high_water("alpaca") == NEWS_ARTICLE.created_at
+        assert reopened.classifier_call_count(OCCURRED_AT.date().isoformat()) == 1
+
+
+def test_successful_classification_is_not_overwritten(tmp_path: Path) -> None:
+    failed = replace(
+        NEWS_CLASSIFICATION,
+        status=ClassificationStatus.FAILED,
+        relevant=None,
+        category=None,
+        significant=None,
+        direction=None,
+        importance=None,
+        confidence=None,
+        rationale=None,
+        safe_error="classifier request failed",
+    )
+    with SQLiteStorage(tmp_path / "no-overwrite.sqlite3") as storage:
+        storage.initialize()
+        storage.save_news_article(NEWS_ARTICLE)
+        assert storage.save_news_classification(NEWS_CLASSIFICATION) is True
+        assert storage.save_news_classification(failed) is False
+        loaded = storage.get_news_classification(
+            NEWS_ARTICLE.article_id,
+            "TSLA",
+            prompt_version="news-classifier-v1",
+            model_version="gpt-5.4-nano-2026-03-17",
+        )
+        assert loaded == NEWS_CLASSIFICATION
+
+
+def test_version_3_database_migrates_news_tables_and_keeps_events(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "legacy-v3.sqlite3"
+    with SQLiteStorage(database_path) as storage:
+        storage.initialize()
+        storage.save_event(EVENT)
+        storage.save_signal(MARKET_SIGNAL, event_id=EVENT.event_id, affected_update=1)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA user_version = 3")
+        for table in (
+            "news_articles",
+            "news_classifications",
+            "news_retrieval_state",
+            "classifier_budget",
+        ):
+            connection.execute(f"DROP TABLE IF EXISTS {table}")
+
+    with SQLiteStorage(database_path) as migrated:
+        migrated.initialize()
+        migrated.save_news_article(NEWS_ARTICLE)
+
+        assert migrated.database_version == DATABASE_VERSION
+        assert migrated.get_event(EVENT.event_id) == EVENT
+        assert migrated.get_signal(MARKET_SIGNAL.signal_id) == MARKET_SIGNAL
+        assert migrated.get_news_article(NEWS_ARTICLE.article_id) == NEWS_ARTICLE

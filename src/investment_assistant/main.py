@@ -3,7 +3,7 @@
 import logging
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib.resources import as_file, files
 
 from investment_assistant.alpaca import (
@@ -32,6 +32,13 @@ from investment_assistant.market_data import (
     last_closed_session_date,
     live_cutoff,
 )
+from investment_assistant.news import AlpacaNewsProvider, NewsProvider, UrllibNewsHttp
+from investment_assistant.news_classifier import (
+    NewsClassifier,
+    OpenAINewsClassifier,
+    UrllibResponsesHttp,
+)
+from investment_assistant.news_ingest import poll_and_classify_news
 from investment_assistant.ops_log import (
     emit_heartbeat,
     heartbeat_is_due,
@@ -61,6 +68,8 @@ def main(
     *,
     settings: Settings | None = None,
     provider: MarketData | None = None,
+    news_provider: NewsProvider | None = None,
+    classifier: NewsClassifier | None = None,
     clock: Clock | None = None,
     loop: bool = True,
     max_cycles: int | None = None,
@@ -71,9 +80,9 @@ def main(
     """Start the application.
 
     Missing Alpaca keys keep the offline abrupt-drop fixture path. Live keys
-    run backfill, then one stock websocket, after-close daily, and stale
-    recovery in one process. Tests inject a fake provider and set
-    ``loop=False``.
+    run backfill, bounded REST news polling, then one stock websocket,
+    after-close daily, and stale recovery in one process. Tests inject a fake
+    provider and set ``loop=False``.
     """
 
     settings = settings or get_settings()
@@ -101,7 +110,15 @@ def main(
         run_offline_console(settings)
         return None
     live_clock = clock or SystemClock()
+    using_production_market = provider is None
     live_provider = provider or build_live_provider(settings, live_clock)
+    live_news = news_provider
+    live_classifier = classifier
+    if using_production_market:
+        if live_news is None:
+            live_news = build_news_provider(settings, live_clock)
+        if live_classifier is None:
+            live_classifier = build_news_classifier(settings, live_clock)
     poll = time.sleep if sleeper is None else sleeper
     try:
         return run_live_session(
@@ -113,6 +130,8 @@ def main(
             sleeper=poll,
             researcher=researcher,
             notifier=notifier,
+            news_provider=live_news,
+            classifier=live_classifier,
         )
     except KeyboardInterrupt:
         logger.info("Stopped")
@@ -148,14 +167,18 @@ def run_live_session(
     researcher: Researcher,
     notifier: Notifier,
     max_cycles: int | None = None,
+    news_provider: NewsProvider | None = None,
+    classifier: NewsClassifier | None = None,
 ) -> LiveIngestResult:
     """Run startup backfill, then one or more live cycles."""
 
     watchlist = settings.watched_tickers()
+    news_symbols = settings.news_watchlist()
     health = StreamHealth(started_at=clock.now())
     latest = LiveIngestResult()
     last_daily_date = None
     last_heartbeat_at: datetime | None = None
+    last_news_poll_at: datetime | None = None
     cycles = 0
     with SQLiteStorage(settings.database_path) as storage:
         storage.initialize()
@@ -172,6 +195,16 @@ def run_live_session(
             bars=len(latest.persisted_bar_ids),
             accepted=len(latest.accepted_signal_ids),
             cutoff=live_cutoff(clock.now()).isoformat(),
+        )
+        last_news_poll_at = _poll_news_if_due(
+            storage=storage,
+            manager=manager,
+            news_provider=news_provider,
+            classifier=classifier,
+            watchlist=news_symbols,
+            clock=clock,
+            last_news_poll_at=last_news_poll_at,
+            force=True,
         )
         _process_pending_events(
             manager,
@@ -297,6 +330,15 @@ def run_live_session(
                         bars=len(daily.persisted_bar_ids),
                         accepted=len(daily.accepted_signal_ids),
                     )
+            last_news_poll_at = _poll_news_if_due(
+                storage=storage,
+                manager=manager,
+                news_provider=news_provider,
+                classifier=classifier,
+                watchlist=news_symbols,
+                clock=clock,
+                last_news_poll_at=last_news_poll_at,
+            )
             _process_pending_events(
                 manager,
                 researcher=researcher,
@@ -329,6 +371,36 @@ def run_live_session(
             ):
                 sleeper(LIVE_POLL_SECONDS)
     return latest
+
+
+def build_news_provider(settings: Settings, clock: Clock) -> AlpacaNewsProvider:
+    """Build the production Alpaca news adapter. Tests inject a fake instead."""
+
+    return AlpacaNewsProvider(
+        http=UrllibNewsHttp(
+            key_id=settings.alpaca_api_key_id,
+            secret=settings.alpaca_api_secret_key.get_secret_value(),
+        ),
+        clock=clock,
+        sleeper=time.sleep,
+        secret=settings.alpaca_api_secret_key.get_secret_value(),
+    )
+
+
+def build_news_classifier(
+    settings: Settings,
+    clock: Clock,
+) -> OpenAINewsClassifier | None:
+    """Build the OpenAI classifier when a key is configured."""
+
+    api_key = settings.openai_api_key.get_secret_value()
+    if not api_key:
+        return None
+    return OpenAINewsClassifier(
+        http=UrllibResponsesHttp(api_key=api_key),
+        clock=clock,
+        api_key=api_key,
+    )
 
 
 def build_live_provider(settings: Settings, clock: Clock) -> AlpacaMarketData:
@@ -378,6 +450,48 @@ def _close_stock_stream(provider: MarketData) -> None:
 def _stock_stream_is_open(provider: MarketData, *, fallback: bool) -> bool:
     state = getattr(provider, "stock_stream_is_open", fallback)
     return state if isinstance(state, bool) else fallback
+
+
+def _poll_news_if_due(
+    *,
+    storage: SQLiteStorage,
+    manager: EventManager,
+    news_provider: NewsProvider | None,
+    classifier: NewsClassifier | None,
+    watchlist: tuple[str, ...],
+    clock: Clock,
+    last_news_poll_at: datetime | None,
+    force: bool = False,
+) -> datetime | None:
+    if news_provider is None:
+        return last_news_poll_at
+    now = clock.now()
+    if (
+        not force
+        and last_news_poll_at is not None
+        and now - last_news_poll_at < timedelta(seconds=LIVE_POLL_SECONDS)
+    ):
+        return last_news_poll_at
+    try:
+        poll_and_classify_news(
+            storage=storage,
+            manager=manager,
+            provider=news_provider,
+            classifier=classifier,
+            watchlist=watchlist,
+            clock=clock,
+        )
+    except Exception as error:
+        logger.warning(
+            "News poll failed",
+            extra={"reason": _safe_news_reason(error)},
+        )
+    return clock.now()
+
+
+def _safe_news_reason(error: BaseException) -> str:
+    text = " ".join(str(error).split())
+    return text[:300] if text else "news poll failed"
 
 
 def _process_pending_events(

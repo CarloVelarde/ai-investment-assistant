@@ -1,6 +1,6 @@
 # Feature Specification: Live News and Classification
 
-**Document status:** Approved
+**Document status:** Complete
 
 ## Purpose
 
@@ -67,9 +67,10 @@ no cooldown. Real research and Discord delivery remain later milestones.
 
 Poll Alpaca's REST news endpoint from the existing linear live loop. Startup
 requests a bounded recent window for the explicit user watchlist, oldest first,
-and follows page tokens within a fixed page cap. Later
-cycles request from the durable high-water mark with a small overlap. Stable
-article identity makes the overlap quiet.
+and follows page tokens within a fixed page cap. Later cycles request from the
+durable high-water mark (the last accepted article's `updated_at`, matching
+Alpaca's updated-date sort) with a small overlap. Stable article identity makes
+the overlap quiet.
 
 News polling is independent of regular-session state and stock-socket
 availability. One failed news request produces a safe diagnostic and does not
@@ -156,32 +157,32 @@ model failures never enter logs, prompts, fixtures, or exceptions.
 
 ## Acceptance criteria
 
-- [ ] AC-01: Alpaca REST pages normalize into validated internal articles with
+- [x] AC-01: Alpaca REST pages normalize into validated internal articles with
   stable provider identity, watched symbols, bounded safe text, and complete
   source/retrieval provenance. Malformed articles do not stop valid siblings.
-- [ ] AC-02: Watchlist, recency, required-field/source, provider-ID, canonical-URL,
+- [x] AC-02: Watchlist, recency, required-field/source, provider-ID, canonical-URL,
   and fixed call-budget checks happen before the classifier. Filtered articles
   make zero classifier calls.
-- [ ] AC-03: The strict classifier schema accepts significant positive, negative,
+- [x] AC-03: The strict classifier schema accepts significant positive, negative,
   and unclear examples and rejects malformed, refused, incomplete, or out-of-
   range output at the adapter boundary.
-- [ ] AC-04: Insignificant, irrelevant, low-confidence, duplicate, and
+- [x] AC-04: Insignificant, irrelevant, low-confidence, duplicate, and
   over-budget candidates are durably explainable but create no signal,
   event, research work, notification work, or cooldown.
-- [ ] AC-05: Each qualifying article/ticker pair becomes one stable `NewsSignal`
+- [x] AC-05: Each qualifying article/ticker pair becomes one stable `NewsSignal`
   with classification and source provenance. News alone can create an event and
   related news can enrich/requeue an existing event through the unchanged event
   manager.
-- [ ] AC-06: Startup recovery, page overlap, same-article restart, and bounded
+- [x] AC-06: Startup recovery, page overlap, same-article restart, and bounded
   retry are idempotent. One accepted article produces at most one signal and one
   eligible event update for its classification version.
-- [ ] AC-07: News polling and pending event work continue while the regular
+- [x] AC-07: News polling and pending event work continue while the regular
   session is closed or the stock socket is unavailable. News failure does not
   stop market processing, and market failure does not invent news.
-- [ ] AC-08: Prompt input, output, calls per pass/day, pages, retry, time, and
+- [x] AC-08: Prompt input, output, calls per pass/day, pages, retry, time, and
   stored error detail are bounded. Secrets and private data do not appear in
   logs, prompts, fixtures, exceptions, or test output.
-- [ ] AC-09: No news websocket, research model/tool, Discord adapter, worker,
+- [x] AC-09: No news websocket, research model/tool, Discord adapter, worker,
   scheduler, autonomous action, market-rule change, or event-manager policy
   change is added. Ruff, mypy, and pytest pass.
 
@@ -205,8 +206,9 @@ model failures never enter logs, prompts, fixtures, or exceptions.
 
 - Use REST-only Alpaca news retrieval for the MVP. Keep a news websocket as a
   possible later optimization; see [D-029](../../docs/DECISIONS.md).
-- Use a 72-hour fresh-start window, 10-page cap, 30-second cadence, 20-call
-  per-pass limit, and 100-call UTC-day limit.
+- Use a 72-hour fresh-start window, 10-page cap, 30-second cadence, 5-minute
+  query overlap, 20-call per-pass limit, and 100-call UTC-day limit. Incremental
+  retrieval high-water is the last accepted article's `updated_at`.
 - Use `gpt-5.4-nano-2026-03-17`, `store=false`, no tools, and strict Responses API
   Structured Outputs for the first classifier contract.
 - Use the controlled category list above and a fixed `0.70` confidence floor.
