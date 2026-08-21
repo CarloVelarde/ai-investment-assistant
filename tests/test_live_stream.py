@@ -98,7 +98,7 @@ def test_regular_session_filter_matches_eastern_hours() -> None:
     assert is_regular_session_minute(datetime(2026, 2, 2, 14, 0, tzinfo=UTC)) is False
 
 
-def test_extended_hours_minute_is_stored_but_not_evaluated(tmp_path: Path) -> None:
+def test_extended_hours_minute_is_ignored(tmp_path: Path) -> None:
     clock = SteppingClock(NOW)
     premarket = _minute(datetime(2026, 2, 2, 14, 0, tzinfo=UTC), Decimal("90"))
 
@@ -118,9 +118,39 @@ def test_extended_hours_minute_is_stored_but_not_evaluated(tmp_path: Path) -> No
         )
 
         assert outcome.accepted_signal_ids == ()
-        assert storage.get_market_bar(premarket.bar_id) == premarket
+        assert outcome.diagnostics == (
+            f"ignored non-regular minute {premarket.bar_id}",
+        )
+        assert storage.get_market_bar(premarket.bar_id) is None
         assert processed == ()
         assert storage.list_events() == ()
+
+
+def test_stream_retains_1559_but_ignores_1600_eastern(tmp_path: Path) -> None:
+    clock = SteppingClock(datetime(2026, 2, 2, 21, 1, tzinfo=UTC))
+    last_regular = _minute(datetime(2026, 2, 2, 20, 59, tzinfo=UTC), Decimal("100"))
+    at_close = _minute(datetime(2026, 2, 2, 21, 0, tzinfo=UTC), Decimal("90"))
+    provider = FakeMarketData(
+        stream=(
+            StreamMinute(StreamEventKind.BAR, last_regular),
+            StreamMinute(StreamEventKind.BAR, at_close),
+        ),
+        session=SESSION,
+    )
+
+    with SQLiteStorage(tmp_path / "stream-boundary.sqlite3") as storage:
+        storage.initialize()
+        result = ingest_stream_minutes(
+            storage=storage,
+            manager=EventManager(storage, clock=clock),
+            provider=provider,
+            watchlist=WATCHLIST,
+            clock=clock,
+        )
+
+        assert result.persisted_bar_ids == (last_regular.bar_id,)
+        assert storage.get_market_bar(last_regular.bar_id) == last_regular
+        assert storage.get_market_bar(at_close.bar_id) is None
 
 
 def test_first_crossing_emits_and_continuation_stays_quiet(tmp_path: Path) -> None:

@@ -62,7 +62,7 @@ Adapters retrieve market and news data and convert provider responses into valid
 
 Detection consumes normalized records and only produces signals; it does not enqueue research.
 
-- The fast market detector evaluates completed bars for abrupt movement and emits only on a qualifying threshold crossing or material severity escalation; same-severity continuation stays quiet until rearm.
+- The fast market detector evaluates completed regular-session minute bars for abrupt movement and emits only on a qualifying threshold crossing or material severity escalation; same-severity continuation stays quiet until rearm. The MVP does not retain or evaluate premarket, after-hours, overnight, or 16:00-start minute bars.
 - A session-open gap check compares the prior completed regular close to today’s regular open (`session_gap`). It runs once per symbol per session.
 - The after-close daily market detector uses the same history to evaluate five- and twenty-trading-day movement, recent-high drawdown, and performance relative to `SPY`. Only **finished** daily bars count. Today’s still-moving price is not the day’s close.
 - Storage-backed detector reads are bounded to the rule lookback and evaluated as of the triggering bar. Older recovered bars cannot rewind newer detector state; delayed same-session `SPY` data can complete a relative rule that was skipped earlier.
@@ -85,7 +85,7 @@ Research receives a prepared evidence packet only after an event needs work. The
 SQLite stores the state needed for recovery, history, replay, and idempotency:
 
 - Configuration and watchlist data.
-- Normalized market history and detector baselines.
+- Normalized daily history, regular-session minute history, and detector baselines.
 - Signals, articles, and classifications.
 - Event lifecycle and retry state.
 - Reports, source metadata, and provenance.
@@ -138,7 +138,7 @@ Lifecycle state survives restarts. Interrupted research resumes research, while 
 
 ## Reliability and security
 
-- Keep one live stock stream during regular hours; detect stale sockets, reconnect, and backfill missing bars where possible.
+- Keep one live stock stream only while the provider reports the regular session open; detect stale sockets, reconnect, and backfill missing bars during that session. REST recovery, latest completed daily catch-up, and durable pending work do not require the socket.
 - Persist event and notification state before irreversible actions.
 - Use stable identifiers and idempotent processing.
 - Retry transient failures with bounded backoff.
@@ -157,5 +157,6 @@ Lifecycle state survives restarts. Interrupted research resumes research, while 
 - [Live market data](../specs/004-live-market-data/SPEC.md) feeds those same bars from Alpaca REST history, after-close daily bars, and one stock websocket so completed regular-session minutes reach the fast detector in near real time.
 - [Ops visibility](../specs/005-ops-visibility/SPEC.md) adds an optional live heartbeat and a separate optional watch logger. It does not change market rules or replace Milestone 5.
 - [Live session hardening](../specs/006-live-session-hardening/SPEC.md) completed the current live market loop: after-close daily rules run only on finished days, and `session_gap` compares the last regular close with today’s regular open once per symbol per session.
+- [Regular session lifecycle correction](../specs/007-regular-session-lifecycle/SPEC.md) completed the pre-Milestone-5 correction: isolate regular minutes, gate the socket by session state, close the startup history/stream handoff, and recover the latest missed daily scan.
 
 That path does not make news a gate for market events or market movement a gate for significant news. Later milestones add news classification that can accept significant good or bad news, real research, and Discord in roadmap order. Offline news detection today is a negative-phrase demo only.

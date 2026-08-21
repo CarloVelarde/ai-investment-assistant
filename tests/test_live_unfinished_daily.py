@@ -117,7 +117,7 @@ def test_with_daily_completeness_marks_open_session_row_unfinished() -> None:
     assert finished.is_complete is True
 
 
-def test_unfinished_today_daily_does_not_emit_or_save_high_state(
+def test_unfinished_today_stays_out_while_latest_completed_daily_can_emit(
     tmp_path: Path,
 ) -> None:
     provider = FakeMarketData(
@@ -167,10 +167,10 @@ def test_unfinished_today_daily_does_not_emit_or_save_high_state(
 
     assert today_bar.is_complete is False
     assert today_bar.close == Decimal("84.21")
-    assert result.accepted_signal_ids == ()
-    assert processed == ()
-    assert events == ()
-    assert research_calls == []
+    assert len(result.accepted_signal_ids) >= 1
+    assert len(processed) == 1
+    assert len(events) == 1
+    assert research_calls == [processed[0].current_update]
     assert twenty_day is not None
     assert twenty_day.last_emitted_importance is SignalImportance.MODERATE
     assert five_day is not None
@@ -230,13 +230,17 @@ def test_same_amd_day_emits_high_after_the_session_closes(tmp_path: Path) -> Non
             if isinstance(signal, MarketSignal)
         }
 
-    assert open_result.accepted_signal_ids == ()
-    assert open_processed == ()
+    assert len(open_result.accepted_signal_ids) >= 1
+    assert len(open_processed) == 1
     assert today_bar.is_complete is True
     assert today_bar.close == Decimal("84.21")
     assert len(closed.accepted_signal_ids) >= 1
     assert len(processed) == 1
-    assert research_calls == [processed[0].current_update]
+    assert research_calls == [
+        open_processed[0].current_update,
+        processed[0].current_update,
+    ]
+    assert processed[0].current_update > open_processed[0].current_update
     assert processed[0].current_update >= 1
     assert RULE_MULTI_DAY_MOVE in rules
     assert twenty_day is not None

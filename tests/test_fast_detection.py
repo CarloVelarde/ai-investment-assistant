@@ -53,6 +53,24 @@ def _minute_bar(
     )
 
 
+def _minute_at(start_at: datetime, *, close: Decimal) -> MarketBar:
+    return MarketBar(
+        ticker="TSLA",
+        timeframe=MarketTimeframe.ONE_MINUTE,
+        start_at=start_at,
+        end_at=start_at + timedelta(minutes=1),
+        open=close,
+        high=close,
+        low=close,
+        close=close,
+        volume=STRONG_VOLUME,
+        is_complete=True,
+        provider="fixture",
+        feed="minute-bars",
+        retrieved_at=start_at + timedelta(minutes=1),
+    )
+
+
 def _series(
     last_close: Decimal,
     *,
@@ -189,6 +207,44 @@ def test_fast_detector_reads_completed_bars_from_storage(tmp_path: Path) -> None
 
     assert _down_signal(first).importance is SignalImportance.CRITICAL
     assert replay.signals == ()
+
+
+def test_legacy_extended_hours_rows_cannot_fill_fast_history(tmp_path: Path) -> None:
+    regular = _series(Decimal("100"), count=59)
+    premarket_start = datetime(2026, 2, 3, 13, 0, tzinfo=UTC)
+    premarket = [
+        _minute_at(premarket_start + timedelta(minutes=index), close=Decimal("100"))
+        for index in range(60)
+    ]
+    next_open = _minute_at(
+        datetime(2026, 2, 3, 14, 30, tzinfo=UTC),
+        close=Decimal("97"),
+    )
+
+    with SQLiteStorage(tmp_path / "legacy-extended.sqlite3") as storage:
+        storage.initialize()
+        for bar in (*regular, *premarket, next_open):
+            storage.save_market_bar(bar)
+
+        result = detect_fast_from_storage(
+            storage,
+            "TSLA",
+            now=next_open.end_at,
+            through_start_at=next_open.start_at,
+        )
+        selected = storage.list_market_bars(
+            "TSLA",
+            MarketTimeframe.ONE_MINUTE,
+            complete_only=True,
+            regular_session_only=True,
+            through_start_at=next_open.start_at,
+            limit=61,
+        )
+
+    assert len(selected) == 60
+    assert all(bar not in selected for bar in premarket)
+    assert result.signals == ()
+    assert result.states == ()
 
 
 def test_older_as_of_evaluation_cannot_rewind_newer_state(tmp_path: Path) -> None:

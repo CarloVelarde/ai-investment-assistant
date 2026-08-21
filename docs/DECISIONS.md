@@ -210,6 +210,34 @@ Alpaca’s daily history still includes **today** while the regular session is o
 
 **Why:** Those rules mean “the day finished.” Treating a 10:25 print as the 16:00 close creates false research and makes restarts change the story.
 
+### D-028 — Keep live recovery independent of the regular-hours socket
+
+This refines D-024 after the 19 Aug 2026 live and restart checks.
+
+- The MVP accepts and retains `1Min` bars only when they start in the regular
+  09:30–16:00 ET session. REST and stream bars outside that range do not enter
+  market history or the fast detector. Existing extended-hours rows, if any,
+  are ignored by detector history.
+- Startup REST recovery runs whether the market is open or closed. It may
+  recover same-session fast signals, today’s session gap, and the most recent
+  completed daily scan without a websocket.
+- The one stock websocket is opened, consumed, and reconnected only while the
+  provider says the regular session is open. A closed-hours start still runs
+  recovery and pending event work, then waits in the same process for the next
+  open.
+- After subscribing during an open session, one REST minute gap fill closes the
+  handoff between the startup history snapshot and live frames.
+- Historical daily bars still warm detector state quietly, but the latest
+  completed daily session may emit once when it has not already been evaluated.
+  Older session gaps and fast moves do not late-fire.
+- Durable pending event work does not depend on establishing a stock socket.
+
+**Why:** Regular-hours rules must not be changed by extended-hours data, and a
+machine that restarts after the close must still recover the market work the MVP
+claims to recover. These rules keep one readable process and reuse existing REST,
+session, detector-state, and event-manager boundaries instead of adding a
+scheduler or worker system.
+
 ## Rejected
 
 ### D-015 — Add a separate `RULES.md`
@@ -234,6 +262,12 @@ Decide these in the feature that first needs them:
 - Model selection, prompts, and report wording. The split is fixed: inexpensive news classification vs later focused research (D-005, D-022). Exact model names stay feature-level.
 - Optional libraries, deployment, interfaces, and provider failover.
 - Strong live-delivery claim/recovery (for example mark delivery in progress before an external send, and reconcile “sent but not recorded”) when Discord and production notification land (Milestone 7). Milestone 2 only re-checks current update before notify and honors a refused notify save.
+- Exchange-calendar handling for holidays and early closes. Spec 007 keeps the
+  existing fixed regular-session boundary and provider `is_open` clock; a full
+  calendar is deferred until observed behavior requires it.
+- Extended-hours or overnight market rules, storage, and feeds. They require a
+  separate product decision rather than sharing the regular-session fast rule.
+- A post-close websocket grace period for late final-minute revisions.
 
 Resolved in feature specs / accepted decisions above when applicable:
 
@@ -242,3 +276,5 @@ Resolved in feature specs / accepted decisions above when applicable:
 - Quiet default logs; independent heartbeat and watch-log opt-ins → D-025 and the ops-visibility spec.
 - Session-open gap (last regular close vs today’s regular open) → D-026 and spec 006.
 - Unfinished daily prices must not run after-close rules → D-027 and spec 006.
+- Regular-session minute isolation, socket-independent recovery, and latest
+  completed daily catch-up → D-028 and spec 007.

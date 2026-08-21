@@ -5,6 +5,8 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from investment_assistant.clock import SteppingClock
 from investment_assistant.event_manager import EventManager
 from investment_assistant.live_ingest import backfill_and_replay
@@ -16,7 +18,11 @@ from investment_assistant.market_data import (
     live_cutoff,
     minute_backfill_range,
 )
-from investment_assistant.market_metrics import RULE_ABRUPT_MOVE, RULE_MULTI_DAY_MOVE
+from investment_assistant.market_metrics import (
+    RULE_ABRUPT_MOVE,
+    RULE_MULTI_DAY_MOVE,
+    RULE_SESSION_GAP,
+)
 from investment_assistant.models import (
     Event,
     MarketBar,
@@ -131,6 +137,36 @@ def test_minute_backfill_uses_the_open_session() -> None:
     assert end == NOW
 
 
+def test_rest_replay_retains_1559_but_ignores_1600_eastern(tmp_path: Path) -> None:
+    after_close = datetime(2026, 2, 3, 0, 0, tzinfo=UTC)
+    last_regular = _minute(datetime(2026, 2, 2, 20, 59, tzinfo=UTC), Decimal("100"))
+    at_close = _minute(datetime(2026, 2, 2, 21, 0, tzinfo=UTC), Decimal("90"))
+    provider = FakeMarketData(
+        history=(last_regular, at_close),
+        session=MarketSession(
+            is_open=False,
+            timestamp=after_close,
+            next_open=datetime(2026, 2, 3, 14, 30, tzinfo=UTC),
+            next_close=datetime(2026, 2, 3, 21, 0, tzinfo=UTC),
+        ),
+    )
+    clock = SteppingClock(after_close)
+
+    with SQLiteStorage(tmp_path / "rest-boundary.sqlite3") as storage:
+        storage.initialize()
+        result = backfill_and_replay(
+            storage=storage,
+            manager=EventManager(storage, clock=clock),
+            provider=provider,
+            watchlist=WATCHLIST,
+            clock=clock,
+        )
+
+        assert result.persisted_bar_ids == (last_regular.bar_id,)
+        assert storage.get_market_bar(last_regular.bar_id) == last_regular
+        assert storage.get_market_bar(at_close.bar_id) is None
+
+
 def test_startup_backfill_saves_21_daily_bars_without_duplicates(
     tmp_path: Path,
 ) -> None:
@@ -165,10 +201,10 @@ def test_startup_backfill_saves_21_daily_bars_without_duplicates(
     assert second.accepted_signal_ids == ()
 
 
-def test_quiet_replay_updates_state_without_research(tmp_path: Path) -> None:
-    days = _weekdays_ending(date(2026, 1, 30), 6)
-    history = [_daily(day, Decimal("100")) for day in days[:-1]]
-    history.append(_daily(days[-1], Decimal("95")))
+def test_older_daily_crossing_warms_state_without_research(tmp_path: Path) -> None:
+    days = _weekdays_ending(date(2026, 1, 30), 7)
+    history = [_daily(day, Decimal("100")) for day in days[:-2]]
+    history.extend(_daily(day, Decimal("95")) for day in days[-2:])
     provider = FakeMarketData(history=history, session=SESSION)
     research_calls: list[int] = []
     clock = SteppingClock(NOW)
@@ -202,7 +238,101 @@ def test_quiet_replay_updates_state_without_research(tmp_path: Path) -> None:
     assert state.last_emitted_importance is SignalImportance.MODERATE
 
 
-def test_quiet_replay_does_not_close_an_open_episode(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("restart_at", "latest_day"),
+    (
+        (
+            datetime(2026, 2, 3, 13, 0, tzinfo=UTC),
+            date(2026, 2, 2),
+        ),
+        (
+            datetime(2026, 2, 7, 17, 0, tzinfo=UTC),
+            date(2026, 2, 6),
+        ),
+    ),
+    ids=("next-morning", "weekend"),
+)
+def test_latest_completed_daily_recovery_emits_once_without_old_intraday_rules(
+    tmp_path: Path,
+    restart_at: datetime,
+    latest_day: date,
+) -> None:
+    days = _weekdays_ending(latest_day, 6)
+    daily = [_daily(day, Decimal("100")) for day in days[:-1]]
+    daily.append(_daily(latest_day, Decimal("95")))
+    session_open = datetime(
+        latest_day.year,
+        latest_day.month,
+        latest_day.day,
+        14,
+        30,
+        tzinfo=UTC,
+    )
+    minutes = [
+        _minute(session_open + timedelta(minutes=index), Decimal("95"))
+        for index in range(60)
+    ]
+    minutes.append(
+        _minute(
+            session_open + timedelta(minutes=60),
+            Decimal("91"),
+            volume=Decimal("2000"),
+        )
+    )
+    provider = FakeMarketData(history=(*daily, *minutes), session=SESSION)
+    clock = SteppingClock(restart_at)
+    research_calls: list[int] = []
+
+    with SQLiteStorage(tmp_path / f"daily-catchup-{latest_day}.sqlite3") as storage:
+        storage.initialize()
+        manager = EventManager(storage, clock=clock)
+        first = backfill_and_replay(
+            storage=storage,
+            manager=manager,
+            provider=provider,
+            watchlist=WATCHLIST,
+            clock=clock,
+        )
+        first_processed = manager.process_pending(
+            researcher=_recording_researcher(research_calls),
+            notifier=lambda *_: None,
+        )
+        clock.advance_to(restart_at)
+        second = backfill_and_replay(
+            storage=storage,
+            manager=manager,
+            provider=provider,
+            watchlist=WATCHLIST,
+            clock=clock,
+        )
+        second_processed = manager.process_pending(
+            researcher=_recording_researcher(research_calls),
+            notifier=lambda *_: None,
+        )
+        rules = {
+            signal.rule
+            for event in storage.list_events()
+            for signal in storage.list_signals(event.event_id)
+            if isinstance(signal, MarketSignal)
+        }
+        gap_state = storage.get_detector_state(
+            "TSLA",
+            RULE_SESSION_GAP,
+            MarketWindow.SESSION_OPEN,
+            SignalDirection.DOWN,
+        )
+
+    assert len(first.accepted_signal_ids) == 1
+    assert len(first_processed) == 1
+    assert second.accepted_signal_ids == ()
+    assert second_processed == ()
+    assert research_calls == [1]
+    assert rules == {RULE_MULTI_DAY_MOVE}
+    assert RULE_ABRUPT_MOVE not in rules
+    assert gap_state is None
+
+
+def test_latest_daily_recovery_can_close_an_open_episode(tmp_path: Path) -> None:
     days = _weekdays_ending(date(2026, 1, 30), 6)
     history = [_daily(day, Decimal("100")) for day in days]
     provider = FakeMarketData(history=history, session=SESSION)
@@ -239,9 +369,9 @@ def test_quiet_replay_does_not_close_an_open_episode(tmp_path: Path) -> None:
         events = storage.list_events()
 
     assert created.event is not None
-    assert result.closed_event_ids == ()
-    assert events[0].episode_open is True
-    assert events[0].closed_at is None
+    assert result.closed_event_ids == (created.event.event_id,)
+    assert events[0].episode_open is False
+    assert events[0].closed_at is not None
 
 
 def test_cutoff_or_later_qualifying_bar_can_emit(tmp_path: Path) -> None:

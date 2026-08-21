@@ -31,6 +31,7 @@ from decimal import Decimal
 from pathlib import Path
 from types import TracebackType
 
+from investment_assistant.market_data import is_regular_session_minute
 from investment_assistant.models import (
     DetectorState,
     Event,
@@ -194,6 +195,12 @@ class SQLiteStorage:
     def __init__(self, path: Path) -> None:
         self._connection = sqlite3.connect(path)
         self._connection.row_factory = sqlite3.Row
+        self._connection.create_function(
+            "is_regular_session_minute",
+            1,
+            _sqlite_is_regular_session_minute,
+            deterministic=True,
+        )
         self._connection.execute("PRAGMA foreign_keys = ON")
         self._transaction_depth = 0
 
@@ -718,6 +725,7 @@ class SQLiteStorage:
         timeframe: MarketTimeframe | None = None,
         *,
         complete_only: bool = False,
+        regular_session_only: bool = False,
         start_at_or_after: datetime | None = None,
         through_start_at: datetime | None = None,
         limit: int | None = None,
@@ -737,6 +745,8 @@ class SQLiteStorage:
             params.append(timeframe.value)
         if complete_only:
             conditions.append("is_complete = 1")
+        if regular_session_only:
+            conditions.append("is_regular_session_minute(start_at) = 1")
         if start_at_or_after is not None:
             conditions.append("start_at >= ?")
             params.append(_timestamp(start_at_or_after))
@@ -1192,6 +1202,10 @@ def _timestamp(value: datetime) -> str:
 
 def _datetime(value: object) -> datetime:
     return datetime.fromisoformat(str(value))
+
+
+def _sqlite_is_regular_session_minute(value: object) -> int:
+    return int(is_regular_session_minute(_datetime(value)))
 
 
 def _optional_datetime(value: object) -> datetime | None:

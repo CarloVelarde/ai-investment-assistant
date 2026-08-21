@@ -36,6 +36,13 @@ CLOSED_SESSION = MarketSession(
     next_open=datetime(2026, 2, 3, 14, 30, tzinfo=UTC),
     next_close=datetime(2026, 2, 3, 21, 0, tzinfo=UTC),
 )
+OPEN_AT = datetime(2026, 2, 2, 15, 31, tzinfo=UTC)
+OPEN_SESSION = MarketSession(
+    is_open=True,
+    timestamp=OPEN_AT,
+    next_open=datetime(2026, 2, 3, 14, 30, tzinfo=UTC),
+    next_close=datetime(2026, 2, 2, 21, 0, tzinfo=UTC),
+)
 
 
 def _daily() -> MarketBar:
@@ -95,12 +102,12 @@ def test_main_stops_quietly_on_keyboard_interrupt(tmp_path: Path) -> None:
         watchlist="TSLA",
         database_path=tmp_path / "interrupt.sqlite3",
     )
-    provider = InterruptingProvider(history=(_daily(),), session=CLOSED_SESSION)
+    provider = InterruptingProvider(history=(_daily(),), session=OPEN_SESSION)
 
     result = main(
         settings=settings,
         provider=provider,
-        clock=SteppingClock(CLOSED_AT),
+        clock=SteppingClock(OPEN_AT),
         loop=True,
         sleeper=lambda _seconds: None,
         notifier=lambda *_: None,
@@ -257,10 +264,10 @@ def test_main_auth_failure_is_safe_and_does_not_print_the_secret(
     )
     provider = AlpacaMarketData(
         http=ScriptedHistoryHttp(),
-        clock=SteppingClock(CLOSED_AT),
+        clock=SteppingClock(OPEN_AT),
         feed="iex",
         sleeper=lambda _seconds: None,
-        session=CLOSED_SESSION,
+        session=OPEN_SESSION,
         transport=transport,
         key_id="test-key-id",
         secret=SECRET,
@@ -271,7 +278,7 @@ def test_main_auth_failure_is_safe_and_does_not_print_the_secret(
         main(
             settings=_live_settings(tmp_path / "auth.sqlite3"),
             provider=provider,
-            clock=SteppingClock(CLOSED_AT),
+            clock=SteppingClock(OPEN_AT),
             loop=False,
             sleeper=lambda _seconds: None,
             notifier=lambda *_: None,
@@ -281,12 +288,75 @@ def test_main_auth_failure_is_safe_and_does_not_print_the_secret(
     assert transport.connect_count == 1
 
 
+def test_main_opens_only_during_session_and_closes_at_session_end(
+    tmp_path: Path,
+) -> None:
+    preopen = MarketSession(
+        is_open=False,
+        timestamp=datetime(2026, 2, 3, 13, 0, tzinfo=UTC),
+        next_open=datetime(2026, 2, 3, 14, 30, tzinfo=UTC),
+        next_close=datetime(2026, 2, 3, 21, 0, tzinfo=UTC),
+    )
+    open_session = MarketSession(
+        is_open=True,
+        timestamp=datetime(2026, 2, 3, 14, 31, tzinfo=UTC),
+        next_open=datetime(2026, 2, 4, 14, 30, tzinfo=UTC),
+        next_close=datetime(2026, 2, 3, 21, 0, tzinfo=UTC),
+    )
+    postclose = MarketSession(
+        is_open=False,
+        timestamp=datetime(2026, 2, 3, 21, 1, tzinfo=UTC),
+        next_open=datetime(2026, 2, 4, 14, 30, tzinfo=UTC),
+        next_close=datetime(2026, 2, 4, 21, 0, tzinfo=UTC),
+    )
+    clock = SteppingClock(preopen.timestamp)
+    sessions = iter((preopen, preopen, open_session, postclose, postclose))
+
+    def next_session() -> MarketSession:
+        session = next(sessions)
+        clock.advance_to(session.timestamp)
+        return session
+
+    transport = FakeStockStreamTransport(incoming=_handshake_frames())
+    provider = AlpacaMarketData(
+        http=ScriptedHistoryHttp(),
+        clock=clock,
+        feed="iex",
+        sleeper=lambda _seconds: None,
+        session_provider=next_session,
+        transport=transport,
+        key_id="test-key-id",
+        secret=SECRET,
+        symbols=("TSLA", "SPY"),
+    )
+    sleeps: list[float] = []
+
+    result = main(
+        settings=_live_settings(tmp_path / "session-transition.sqlite3"),
+        provider=provider,
+        clock=clock,
+        loop=True,
+        max_cycles=3,
+        sleeper=sleeps.append,
+        notifier=lambda *_: None,
+    )
+
+    assert result is not None
+    assert transport.connect_count == 1
+    assert transport.subscribe_calls == [("TSLA", "SPY")]
+    assert transport.close_count == 1
+    assert provider.stock_stream_is_open is False
+    assert provider.needs_stream_reconnect is False
+    assert sleeps == [30]
+
+
 def test_main_reconnects_when_the_stock_stream_drops(tmp_path: Path) -> None:
     transport = FakeStockStreamTransport(incoming=_handshake_frames())
     transport.queue_disconnect()
     transport.push_frames(*_handshake_frames())
+    http = ScriptedHistoryHttp()
     provider = AlpacaMarketData(
-        http=ScriptedHistoryHttp(),
+        http=http,
         clock=SteppingClock(datetime(2026, 2, 2, 15, 31, tzinfo=UTC)),
         feed="iex",
         sleeper=lambda _seconds: None,
@@ -315,6 +385,7 @@ def test_main_reconnects_when_the_stock_stream_drops(tmp_path: Path) -> None:
     assert "reconnected stock stream" in result.diagnostics
     assert transport.connect_count == 2
     assert transport.subscribe_calls == [("TSLA", "SPY"), ("TSLA", "SPY")]
+    assert http.requests == 4
 
 
 def test_env_example_documents_live_settings_without_secrets() -> None:
