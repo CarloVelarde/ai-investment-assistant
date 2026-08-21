@@ -161,7 +161,7 @@ def test_heartbeat_fires_on_closed_session_after_sixty_seconds(
 
     assert len(beats) == 1
     assert beats[0]["session_open"] is False
-    assert beats[0]["waiting_on_socket"] is True
+    assert beats[0]["waiting_on_socket"] is False
     assert SECRET not in printed
 
 
@@ -218,7 +218,7 @@ def test_watch_log_narrates_a_canned_live_cycle(
 
     assert " | WATCH | Application started" in printed
     assert " | WATCH | Backfill complete" in printed
-    assert " | WATCH | Stock stream ready" in printed
+    assert " | WATCH | Stock stream ready" not in printed
     assert (
         " | WATCH | After-close daily scan" in printed
         or " | WATCH | After-close daily fetch" in printed

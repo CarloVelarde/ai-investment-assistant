@@ -408,6 +408,7 @@ def detect_fast_from_storage(
         ticker,
         MarketTimeframe.ONE_MINUTE,
         complete_only=True,
+        regular_session_only=True,
         through_start_at=through_start_at,
         limit=FAST_HISTORY_LIMIT,
     )

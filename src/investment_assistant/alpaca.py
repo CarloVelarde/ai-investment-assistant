@@ -155,6 +155,12 @@ class AlpacaMarketData:
         return self._transport is not None
 
     @property
+    def stock_stream_is_open(self) -> bool:
+        """Return True when the configured stock stream completed subscription."""
+
+        return self._stream_open
+
+    @property
     def stock_stream_url(self) -> str | None:
         """Return the configured stock websocket URL, if the transport has one."""
 

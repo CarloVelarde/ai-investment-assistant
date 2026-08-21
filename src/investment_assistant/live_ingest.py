@@ -55,6 +55,13 @@ class StreamHealth:
     last_message_at: datetime | None = None
     last_spy_regular_end_at: datetime | None = None
 
+    def reset(self, *, now: datetime) -> None:
+        """Start freshness tracking for a newly subscribed socket."""
+
+        self.started_at = now
+        self.last_message_at = None
+        self.last_spy_regular_end_at = None
+
     def record(self, event: StreamMinute, *, now: datetime) -> None:
         """Remember a websocket minute for silence and SPY freshness."""
 
@@ -134,16 +141,15 @@ def ingest_stream_minute(
         ticker.strip().upper() for ticker in watchlist if ticker.strip()
     )
     if not is_regular_session_minute(bar.start_at):
-        storage.save_market_bar(bar)
         watch(
-            "Stream minute stored",
+            "Stream minute ignored",
             ticker=bar.ticker,
             kind=event.kind.value,
             start_at=bar.start_at.isoformat(),
             evaluated=False,
         )
         return MarketBarProcessingResult(
-            diagnostics=(f"stored extended-hours minute {bar.bar_id}",),
+            diagnostics=(f"ignored non-regular minute {bar.bar_id}",),
         )
     result = process_market_bar(
         storage=storage,
@@ -236,7 +242,8 @@ def ingest_stream_minutes(
         accepted.extend(outcome.accepted_signal_ids)
         diagnostics.extend(outcome.diagnostics)
         closed.extend(outcome.closed_event_ids)
-        persisted.append(event.bar.bar_id)
+        if is_regular_session_minute(event.bar.start_at):
+            persisted.append(event.bar.bar_id)
     return LiveIngestResult(
         accepted_signal_ids=tuple(accepted),
         diagnostics=tuple(diagnostics),
@@ -456,6 +463,7 @@ def _minute_gap_start(
             symbol,
             MarketTimeframe.ONE_MINUTE,
             complete_only=True,
+            regular_session_only=True,
             limit=1,
         )
         if bars:
@@ -481,6 +489,12 @@ def _replay_bars(
     persisted: list[str] = []
     as_of = clock.now()
     for bar in _bars_in_evaluation_order(bars):
+        if (
+            bar.timeframe is MarketTimeframe.ONE_MINUTE
+            and not is_regular_session_minute(bar.start_at)
+        ):
+            diagnostics.append(f"ignored non-regular minute {bar.bar_id}")
+            continue
         bar = with_daily_completeness(bar, as_of=as_of)
         _sync_clock(clock, bar.end_at)
         outcome = process_market_bar(

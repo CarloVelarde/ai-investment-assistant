@@ -2,18 +2,18 @@
 
 **Document status:** Approved
 
-**Execution status:** Not started
+**Execution status:** In progress — Tasks 1 and 2 complete
 
 Milestone 5 remains not started until this corrective slice is implemented and
 validated.
 
 ## Tasks
 
-- [ ] 1. Enforce the regular-minute invariant across REST replay, stream ingest,
+- [x] 1. Enforce the regular-minute invariant across REST replay, stream ingest,
   gap fill, storage, and fast-detector history. Ignore new non-regular minutes;
   prove 15:59 ET is accepted, 16:00 ET is rejected, and existing extended-hours
   rows cannot contaminate a later regular one-hour window.
-- [ ] 2. Make the live loop session-aware without adding a scheduler: process
+- [x] 2. Make the live loop session-aware without adding a scheduler: process
   startup recovery and pending events independently, open/consume/reconnect the
   one stock socket only while the provider session is open, close it when closed,
   and allow a closed start to connect at the next open. Use explicit connection

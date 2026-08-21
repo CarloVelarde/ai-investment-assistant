@@ -172,32 +172,100 @@ def run_live_session(
             accepted=len(latest.accepted_signal_ids),
             cutoff=live_cutoff(clock.now()).isoformat(),
         )
-        _open_stock_stream(provider)
-        watch(
-            "Stock stream ready",
-            url=getattr(provider, "stock_stream_url", None),
-            symbols=",".join(watchlist),
-            channels="bars,updatedBars",
+        _process_pending_events(
+            manager,
+            researcher=researcher,
+            notifier=notifier,
         )
+        stream_connected = _stock_stream_is_open(provider, fallback=False)
         heartbeat_started_at = clock.now()
         while True:
-            stream = ingest_stream_minutes(
-                storage=storage,
-                manager=manager,
-                provider=provider,
-                watchlist=watchlist,
-                clock=clock,
-                health=health,
-            )
-            latest = _combine(latest, stream)
-            if stream.persisted_bar_ids:
-                watch(
-                    "Stream minutes ingested",
-                    minutes=len(stream.persisted_bar_ids),
-                    accepted=len(stream.accepted_signal_ids),
-                )
             session = provider.get_session()
-            if not session.is_open:
+            if session.is_open:
+                if not stream_connected:
+                    stream_connected = _open_stock_stream(provider)
+                    if stream_connected:
+                        health.reset(now=clock.now())
+                        watch(
+                            "Stock stream ready",
+                            url=getattr(provider, "stock_stream_url", None),
+                            symbols=",".join(watchlist),
+                            channels="bars,updatedBars",
+                        )
+                if stream_connected:
+                    stream = ingest_stream_minutes(
+                        storage=storage,
+                        manager=manager,
+                        provider=provider,
+                        watchlist=watchlist,
+                        clock=clock,
+                        health=health,
+                    )
+                    latest = _combine(latest, stream)
+                    stream_connected = _stock_stream_is_open(
+                        provider,
+                        fallback=True,
+                    )
+                    if stream.persisted_bar_ids:
+                        watch(
+                            "Stream minutes ingested",
+                            minutes=len(stream.persisted_bar_ids),
+                            accepted=len(stream.accepted_signal_ids),
+                        )
+                reconnected = _reconnect_if_dropped(
+                    provider,
+                    storage=storage,
+                    manager=manager,
+                    watchlist=watchlist,
+                    clock=clock,
+                    sleeper=sleeper,
+                )
+                if reconnected is not None:
+                    latest = _combine(latest, reconnected)
+                    stream_connected = _stock_stream_is_open(
+                        provider,
+                        fallback=True,
+                    )
+                    health.reset(now=clock.now())
+                    watch(
+                        "Stock stream reconnected",
+                        bars=len(reconnected.persisted_bar_ids),
+                    )
+                stale = diagnose_stream_health(
+                    health,
+                    now=clock.now(),
+                    session=session,
+                )
+                if stale.is_stale and reconnected is None:
+                    recovered = recover_stale_stream(
+                        storage=storage,
+                        manager=manager,
+                        provider=provider,
+                        watchlist=watchlist,
+                        clock=clock,
+                        health=health,
+                        sleeper=sleeper,
+                    )
+                    latest = _combine(latest, recovered)
+                    stream_connected = _stock_stream_is_open(
+                        provider,
+                        fallback=stream_connected,
+                    )
+                    if stale.socket_silent:
+                        health.reset(now=clock.now())
+                    watch(
+                        "Stale stream recovered",
+                        diagnostics=",".join(stale.diagnostics),
+                        bars=len(recovered.persisted_bar_ids),
+                    )
+            else:
+                if stream_connected or _stock_stream_is_open(
+                    provider,
+                    fallback=False,
+                ):
+                    _close_stock_stream(provider)
+                    stream_connected = False
+                    watch("Stock stream closed", reason="regular session closed")
                 session_day = last_closed_session_date(clock.now())
                 if last_daily_date != session_day:
                     daily = run_after_close_daily(
@@ -215,51 +283,11 @@ def run_live_session(
                         bars=len(daily.persisted_bar_ids),
                         accepted=len(daily.accepted_signal_ids),
                     )
-            reconnected = _reconnect_if_dropped(
-                provider,
-                storage=storage,
-                manager=manager,
-                watchlist=watchlist,
-                clock=clock,
-                sleeper=sleeper,
-            )
-            if reconnected is not None:
-                latest = _combine(latest, reconnected)
-                watch(
-                    "Stock stream reconnected",
-                    bars=len(reconnected.persisted_bar_ids),
-                )
-            stale = diagnose_stream_health(
-                health,
-                now=clock.now(),
-                session=session,
-            )
-            if stale.is_stale and reconnected is None:
-                recovered = recover_stale_stream(
-                    storage=storage,
-                    manager=manager,
-                    provider=provider,
-                    watchlist=watchlist,
-                    clock=clock,
-                    health=health,
-                    sleeper=sleeper,
-                )
-                latest = _combine(latest, recovered)
-                watch(
-                    "Stale stream recovered",
-                    diagnostics=",".join(stale.diagnostics),
-                    bars=len(recovered.persisted_bar_ids),
-                )
-            processed = manager.process_pending(
+            _process_pending_events(
+                manager,
                 researcher=researcher,
                 notifier=notifier,
             )
-            if processed:
-                watch(
-                    "Pending events processed",
-                    events=len(processed),
-                    tickers=",".join(event.ticker for event in processed),
-                )
             now = clock.now()
             if settings.heartbeat and heartbeat_is_due(
                 now=now,
@@ -272,7 +300,7 @@ def run_live_session(
                     session_open=session.is_open,
                     last_message_at=health.last_message_at,
                     last_spy_regular_end_at=health.last_spy_regular_end_at,
-                    waiting_on_socket=True,
+                    waiting_on_socket=session.is_open,
                 )
                 last_heartbeat_at = now
             cycles += 1
@@ -280,7 +308,11 @@ def run_live_session(
                 break
             if max_cycles is not None and cycles >= max_cycles:
                 break
-            if not getattr(provider, "holds_stock_stream", False):
+            if not session.is_open or not getattr(
+                provider,
+                "holds_stock_stream",
+                False,
+            ):
                 sleeper(LIVE_POLL_SECONDS)
     return latest
 
@@ -309,16 +341,47 @@ def build_live_provider(settings: Settings, clock: Clock) -> AlpacaMarketData:
     )
 
 
-def _open_stock_stream(provider: MarketData) -> None:
+def _open_stock_stream(provider: MarketData) -> bool:
     opener = getattr(provider, "open_stock_stream", None)
     if not callable(opener):
-        return
+        return True
     try:
         opener()
     except StockStreamAuthError:
         raise
     except MarketDataError:
         logger.warning("Stock stream not open after backfill; will retry")
+        return False
+    return _stock_stream_is_open(provider, fallback=True)
+
+
+def _close_stock_stream(provider: MarketData) -> None:
+    closer = getattr(provider, "close_stock_stream", None)
+    if callable(closer):
+        closer()
+
+
+def _stock_stream_is_open(provider: MarketData, *, fallback: bool) -> bool:
+    state = getattr(provider, "stock_stream_is_open", fallback)
+    return state if isinstance(state, bool) else fallback
+
+
+def _process_pending_events(
+    manager: EventManager,
+    *,
+    researcher: Researcher,
+    notifier: Notifier,
+) -> None:
+    processed = manager.process_pending(
+        researcher=researcher,
+        notifier=notifier,
+    )
+    if processed:
+        watch(
+            "Pending events processed",
+            events=len(processed),
+            tickers=",".join(event.ticker for event in processed),
+        )
 
 
 def _reconnect_if_dropped(

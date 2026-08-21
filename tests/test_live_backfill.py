@@ -131,6 +131,36 @@ def test_minute_backfill_uses_the_open_session() -> None:
     assert end == NOW
 
 
+def test_rest_replay_retains_1559_but_ignores_1600_eastern(tmp_path: Path) -> None:
+    after_close = datetime(2026, 2, 3, 0, 0, tzinfo=UTC)
+    last_regular = _minute(datetime(2026, 2, 2, 20, 59, tzinfo=UTC), Decimal("100"))
+    at_close = _minute(datetime(2026, 2, 2, 21, 0, tzinfo=UTC), Decimal("90"))
+    provider = FakeMarketData(
+        history=(last_regular, at_close),
+        session=MarketSession(
+            is_open=False,
+            timestamp=after_close,
+            next_open=datetime(2026, 2, 3, 14, 30, tzinfo=UTC),
+            next_close=datetime(2026, 2, 3, 21, 0, tzinfo=UTC),
+        ),
+    )
+    clock = SteppingClock(after_close)
+
+    with SQLiteStorage(tmp_path / "rest-boundary.sqlite3") as storage:
+        storage.initialize()
+        result = backfill_and_replay(
+            storage=storage,
+            manager=EventManager(storage, clock=clock),
+            provider=provider,
+            watchlist=WATCHLIST,
+            clock=clock,
+        )
+
+        assert result.persisted_bar_ids == (last_regular.bar_id,)
+        assert storage.get_market_bar(last_regular.bar_id) == last_regular
+        assert storage.get_market_bar(at_close.bar_id) is None
+
+
 def test_startup_backfill_saves_21_daily_bars_without_duplicates(
     tmp_path: Path,
 ) -> None:
