@@ -58,6 +58,12 @@ Product behavior is defined in [`PRODUCT.md`](PRODUCT.md), durable choices in [`
 
 Adapters retrieve market and news data and convert provider responses into validated internal records. Alpaca is the first live provider, but its SDK types must not enter core logic. Replay fixtures use the same downstream boundaries.
 
+For the MVP, news uses bounded Alpaca REST polling independently of the regular
+market session. A durable high-water mark plus a small query overlap supports
+restart and request-failure recovery. A news websocket is deferred as a possible
+later optimization and, if added, must feed the same normalized article boundary;
+REST remains the recovery path (D-029).
+
 ### Detection
 
 Detection consumes normalized records and only produces signals; it does not enqueue research.
@@ -139,6 +145,10 @@ Lifecycle state survives restarts. Interrupted research resumes research, while 
 ## Reliability and security
 
 - Keep one live stock stream only while the provider reports the regular session open; detect stale sockets, reconnect, and backfill missing bars during that session. REST recovery, latest completed daily catch-up, and durable pending work do not require the socket.
+- Poll news through bounded REST requests while the application runs, including
+  outside regular market hours. Persist accepted articles before advancing the
+  retrieval high-water mark, overlap requests safely, and deduplicate by stable
+  identity (D-029).
 - Persist event and notification state before irreversible actions.
 - Use stable identifiers and idempotent processing.
 - Retry transient failures with bounded backoff.

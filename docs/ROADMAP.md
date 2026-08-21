@@ -5,8 +5,9 @@
 ## Current focus
 
 **Spec 007 — Regular session lifecycle correction** is complete.
-**Milestone 5 — Live news and classification** is now the next planned slice and
-remains not started.
+**Milestone 5 — Live news and classification** is approved and ready for
+implementation under [spec 008](../specs/008-live-news-classification/SPEC.md).
+Implementation remains not started.
 
 The live socket (Milestone 4), opt-in heartbeat / watch log ([spec 005](../specs/005-ops-visibility/SPEC.md)), and live-session hardening ([spec 006](../specs/006-live-session-hardening/SPEC.md)) are in. Spec 006 fixed two problems found by the 19 Aug 2026 live trial:
 
@@ -129,9 +130,11 @@ qualified, and Ctrl+C stopped the process cleanly.
 
 ### Milestone 5 — Live news and classification
 
-**Status:** Not started
+**Status:** Approved; implementation not started
 
-Add Alpaca news, deterministic relevance and duplicate filtering, classifier-call limits, and a small inexpensive structured AI classifier on the news path only. The classifier may mark an article significant whether the story is positive, negative, or unclear. Significant news may create an event alone or enrich and requeue an existing market episode; rejected news creates no event or cooldown. The classifier does not decide research or notification; the existing event manager still does.
+**Spec:** [`specs/008-live-news-classification/`](../specs/008-live-news-classification/SPEC.md)
+
+Add bounded Alpaca REST news polling, deterministic relevance and duplicate filtering, classifier-call limits, and a small inexpensive structured AI classifier on the news path only. The classifier may mark an article significant whether the story is positive, negative, or unclear. Significant news may create an event alone or enrich and requeue an existing market episode; rejected news creates no event or cooldown. The classifier does not decide research or notification; the existing event manager still does. A news websocket is deferred as a possible post-MVP optimization if observed polling timeliness is inadequate.
 
 **Complete when:** significant news of either direction is processed once through the shared event manager without requiring a market trigger or researching every article.
 
@@ -159,4 +162,6 @@ Replay representative market, news, restart, provider-failure, research-failure,
 
 **Complete when:** the local MVP meets the [product success criteria](PRODUCT.md#mvp-success-criteria) with documented limitations.
 
-After the MVP, configurable scan cadences, additional horizons, deployment, interfaces, valuation tools, or provider failover require demonstrated need and a new roadmap decision.
+After the MVP, a news websocket, configurable scan cadences, additional horizons,
+deployment, interfaces, valuation tools, or provider failover require demonstrated
+need and a new roadmap decision.

@@ -85,6 +85,10 @@ Unknown or inactive symbols that Alpaca rejects are skipped with a diagnostic. O
 
 **Not in this milestone:** news stream `wss://stream.data.alpaca.markets/v1beta1/news` and news REST. Same keys; different socket. Milestone 5.
 
+**Later decision:** [D-029](../../docs/DECISIONS.md) and
+[spec 008](../008-live-news-classification/SPEC.md) selected REST-only news for
+the MVP and deferred the news websocket as a possible later optimization.
+
 ### Normalization
 
 Convert each Alpaca bar into `MarketBar` before storage or detection:

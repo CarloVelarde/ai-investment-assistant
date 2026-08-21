@@ -68,6 +68,10 @@ All three produce the same market-signal shape and use volume and volatility as 
 
 ### News monitoring
 
+For the MVP, retrieve Alpaca news through bounded REST polling while the local
+application is running, including outside regular market hours. A news websocket
+is a possible later optimization if observed polling timeliness is inadequate.
+
 Filter company news by watchlist relevance, recency, source, event category, duplicates, and classifier-call limits. Qualifying articles receive a small, inexpensive structured classification with relevance, category, likely significance, direction (positive, negative, or unclear), confidence, and rationale.
 
 That classifier only answers whether an article is worth turning into a **news signal**. It is not a second research model and it does not decide notification.

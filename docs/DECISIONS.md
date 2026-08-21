@@ -238,6 +238,27 @@ claims to recover. These rules keep one readable process and reuse existing REST
 session, detector-state, and event-manager boundaries instead of adding a
 scheduler or worker system.
 
+### D-029 — Use REST-only news retrieval for the MVP
+
+Milestone 5 retrieves Alpaca news through bounded REST polling for the explicit
+user watchlist. Polling continues while the application runs regardless of the
+regular market session or stock-socket state. Startup recovery, ordinary polling,
+and retry use the same paginated adapter with a durable high-water mark, a small
+time overlap, stable article identity, and deterministic duplicate filtering.
+
+The MVP does not open Alpaca's news websocket. A news websocket remains a valid
+later optimization if observed REST latency, rate limits, or missed-delivery risk
+show that polling is inadequate. Any later stream must normalize into the same
+internal article model and retain REST for startup and reconnect recovery. Exact
+polling windows, page limits, and classifier budgets remain feature-level choices
+in spec 008.
+
+**Why:** News is much less frequent than minute market data, and this MVP supports
+human review rather than automated execution. Bounded polling is timely enough
+for that purpose while keeping ordinary retrieval and recovery on one simple,
+restart-safe path. Deferring the socket avoids concurrent connection lifecycle
+work until observed behavior shows it is worth the added complexity.
+
 ## Rejected
 
 ### D-015 — Add a separate `RULES.md`
