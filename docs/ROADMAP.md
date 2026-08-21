@@ -120,6 +120,13 @@ provider-session-aware socket lifecycle, socket-independent recovery and pending
 work, one post-subscription REST handoff fill, and latest-completed-daily catch-up
 are covered by deterministic restart and transition tests.
 
+**Live verification (20 Aug 2026):** An isolated after-close start against real
+IEX data recovered 1,215 bars for TSLA, AMD, and `SPY`, retained 1,122 regular
+minutes through 15:59 ET with no extended-hours rows, ran the completed daily
+scan for all three symbols, and stayed alive with `session_open=false` and
+`waiting_on_socket=false`. No socket or reconnect was attempted, no signal
+qualified, and Ctrl+C stopped the process cleanly.
+
 ### Milestone 5 — Live news and classification
 
 **Status:** Not started
