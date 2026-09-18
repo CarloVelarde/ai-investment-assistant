@@ -4,8 +4,8 @@
 
 **Implementation status:** Not started
 
-The specification package is prepared for Milestone 6. No research implementation
-or live provider validation is claimed by this checklist. Behavior belongs to
+This milestone adds live research and reporting. Implementation has not started;
+the tasks below describe the required work. Behavior belongs to
 [SPEC.md](SPEC.md); implementation approach belongs to [PLAN.md](PLAN.md).
 
 ## Tasks
