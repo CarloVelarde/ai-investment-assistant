@@ -6,7 +6,9 @@
 
 **Milestone 5 — Live news and classification** is complete under
 [spec 008](../specs/008-live-news-classification/SPEC.md).
-The next roadmap item is Milestone 6 — Research and reporting.
+The current planning focus is **Milestone 6 — Research and reporting**, with a
+proposed [specification, plan, and task list](../specs/009-research-and-reporting/SPEC.md)
+under spec 009. Implementation has not started.
 
 The live market loop (Milestones 4, [006](../specs/006-live-session-hardening/SPEC.md),
 and [007](../specs/007-regular-session-lifecycle/SPEC.md)), opt-in heartbeat / watch
@@ -133,7 +135,15 @@ Add bounded Alpaca REST news polling, deterministic relevance and duplicate filt
 
 ### Milestone 6 — Research and reporting
 
-**Status:** Not started
+**Status:** Specification prepared; implementation not started
+
+**Spec:** [`specs/009-research-and-reporting/`](../specs/009-research-and-reporting/SPEC.md)
+
+The proposed [plan](../specs/009-research-and-reporting/PLAN.md) and
+[tasks](../specs/009-research-and-reporting/TASKS.md) cover bounded local evidence,
+focused research with hosted search and SEC filings, validated cited reports,
+durable attempts, and live-loop integration. Console delivery remains in this
+slice; Discord stays in Milestone 7.
 
 Add evidence packets, bounded read-only tools, focused AI research, source tracking, and validated reports. Market-only research must allow an honest “cause unknown” result.
 
