@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from email.message import Message
 from types import TracebackType
+from typing import Protocol
 from urllib.error import HTTPError
 
 import pytest
@@ -111,13 +112,14 @@ def test_deadline_alarm_is_active_across_blocking_phases(
         def read1(self, size: int) -> bytes:
             assert active == [10]
             research_http._timeout_handler(0, None)
-            return b""
+            raise AssertionError("deadline handler must raise")
 
     class BlockingOpener(Opener):
         def open(self, request: object, timeout: float) -> object:
             assert active == [10]
             if phase == "connect":
                 research_http._timeout_handler(0, None)
+                raise AssertionError("deadline handler must raise")
             return super().open(request, timeout)
 
     stream = BlockingStream(b"", timer)
@@ -144,7 +146,7 @@ def test_slow_drip_is_rejected_even_when_each_read_returns(
     assert stream.closed
 
 
-class _StopsRedirects:
+class _RedirectHandler(Protocol):
     def redirect_request(
         self,
         req: object,
@@ -153,8 +155,7 @@ class _StopsRedirects:
         msg: str,
         headers: object,
         newurl: str,
-    ) -> object:
-        return None
+    ) -> object | None: ...
 
 
 def test_error_or_redirect_never_reads_body_or_follows_url(
@@ -165,9 +166,9 @@ def test_error_or_redirect_never_reads_body_or_follows_url(
     headers["Location"] = "https://evil.test/secret"
     error = HTTPError("https://www.sec.gov", 302, "redirect", headers, None)
     opener = Opener(error, timer)
-    handlers: list[_StopsRedirects] = []
+    handlers: list[_RedirectHandler] = []
 
-    def build(handler: _StopsRedirects) -> Opener:
+    def build(handler: _RedirectHandler) -> Opener:
         handlers.append(handler)
         return opener
 
