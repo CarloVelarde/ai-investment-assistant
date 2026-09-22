@@ -1,14 +1,16 @@
 # Feature Specification: Research and Reporting
 
-**Document status:** Proposed
+**Document status:** In implementation
 
 **Milestone:** 6 — Research and reporting
 
-**Implementation status:** Not started
+**Implementation status:** Tasks 1–9 complete; task 10 pending
 
 Implementation approach: [PLAN.md](PLAN.md). Execution and acceptance coverage:
-[TASKS.md](TASKS.md). This proposal implements the existing product and
-architecture decisions; it does not mark the milestone complete.
+[TASKS.md](TASKS.md). This feature implements the existing product and architecture decisions. The
+local evidence foundation, SEC/OpenAI adapters, bounded research runner, live-loop
+wiring, post-research recovery, and console rendering are implemented. End-to-end
+milestone closeout remains task 10. The milestone is not complete.
 
 ## Purpose
 
@@ -371,39 +373,39 @@ configurable dollar budget remains Milestone 7.
 
 ## Acceptance criteria
 
-- [ ] AC-01: For a queued event, the application assembles a bounded local
+- [x] AC-01: For a queued event, the application assembles a bounded local
   evidence packet from saved event, signal, market, news, and prior-report
   state. The model does not receive secrets or unrestricted system access.
-- [ ] AC-02: A valid live report matches the schema, cites sources, states
+- [x] AC-02: A valid live report matches the schema, cites sources, states
   uncertainty, and uses only a permitted posture. It is saved before notify
   and `is_fake` is false.
-- [ ] AC-03: A market-only event with no corroborating news or filing may
+- [x] AC-03: A market-only event with no corroborating news or filing may
   persist `cause_unknown=true` and must not invent a cause or source.
 - [ ] AC-04: Significant news-only and market-plus-news events can each
   produce one report for the current update without changing event-manager
   eligibility rules.
-- [ ] AC-05: Web search and EDGAR tools are optional, bounded, read-only, and
+- [x] AC-05: Web search and EDGAR tools are optional, bounded, read-only, and
   application-controlled. Tool failure or a missing SEC user-agent degrades
   safely and does not by itself skip a packet-based report.
-- [ ] AC-06: The application stops the tool loop at the first cap (turns,
+- [x] AC-06: The application stops the tool loop at the first cap (turns,
   calls, per-tool limit, or duplicate-call exhaustion). Duplicate EDGAR
   requests are not re-executed; hosted search uses the API cap and returned
   counts. A cap without a valid report forces one no-tool final report.
-- [ ] AC-07: Wall-clock timeout, refusal, schema mismatch, missing final
+- [x] AC-07: Wall-clock timeout, refusal, schema mismatch, missing final
   report are retryable failures with no report and no notification. Missing
   keys and daily-budget exhaustion defer without a provider call or fake report.
-- [ ] AC-08: Restart of interrupted research retries the current update; a
+- [x] AC-08: Restart of interrupted research retries the current update; a
   saved report resumes at notify without a second model call. One update
   still yields at most one report.
-- [ ] AC-09: Offline fixtures and pytest keep the fake researcher. Live mode
+- [x] AC-09: Offline fixtures and pytest keep the fake researcher. Live mode
   without an OpenAI key writes no fake report. Pytest uses fakes for the
   model, tools, and clock.
 - [ ] AC-10: No Discord adapter, worker, detector change, classifier change,
   or event-policy change is added. Ruff, mypy, and pytest pass.
-- [ ] AC-11: One research attempt per live pass, notification-only recovery,
+- [x] AC-11: One research attempt per live pass, notification-only recovery,
   fair selection, five-minute retry spacing, and post-research minute recovery
   work with fake clocks/providers in open and closed sessions.
-- [ ] AC-12: Attempt reservations, daily budgets, packet/evidence snapshots,
+- [x] AC-12: Attempt reservations, daily budgets, packet/evidence snapshots,
   and retry times survive restarts. Migration preserves existing fake reports
   and completed updates without reprocessing them.
 - [ ] AC-13: Unknown citations, arbitrary filing URLs, prompt-injection text,
@@ -445,8 +447,9 @@ configurable dollar budget remains Milestone 7.
 - [GPT-5.4 mini snapshot and supported features](https://developers.openai.com/api/docs/models/gpt-5.4-mini)
 - [OpenAI web search](https://developers.openai.com/api/docs/guides/tools-web-search)
 - [SEC EDGAR APIs](https://www.sec.gov/search-filings/edgar-application-programming-interfaces)
+- [OpenAI stateless reasoning continuation](https://developers.openai.com/api/docs/guides/reasoning)
 - [SEC developer resources and fair access](https://www.sec.gov/about/developer-resources)
 
-Provider references checked on 17 September 2026. They establish API behavior,
+Provider references checked on 18 September 2026. They establish API behavior,
 not a live account-access or report-quality test. Fixed limits above are this
 feature's application policy.

@@ -9,9 +9,15 @@ import pytest
 from investment_assistant.models import (
     Event,
     EventStatus,
+    EvidenceSource,
+    EvidenceText,
+    LiveReportDetails,
     MarketSignal,
     MarketWindow,
     NewsSignal,
+    ReportDraft,
+    ResearchReport,
+    ResearchUsage,
     SignalDirection,
     SignalImportance,
     SourceDetails,
@@ -98,3 +104,75 @@ def test_emits_one_console_notification(
         f"{EVENT_NOTIFICATION_PREFIX} | ticker=ACME | event_id=event-1 | "
         f"update=2 | report={report.summary}"
     ]
+    assert FAKE_RESEARCH_PREFIX in report.summary
+
+
+def test_emits_live_console_notification_with_posture_uncertainty_and_sources(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    details = LiveReportDetails(
+        company=None,
+        triggering_signal_ids=("market-1",),
+        analysis=ReportDraft(
+            summary="A saved price decline needs review; its cause is unknown.",
+            likely_explanation=EvidenceText(
+                text="Cause unknown from the local observations.",
+                references=("signal:market-1",),
+                is_hypothesis=False,
+            ),
+            competing_explanations=(),
+            market_context=(),
+            bullish_considerations=(),
+            bearish_considerations=(),
+            missing_information=("No corroborating company evidence.",),
+            uncertainty="Price movement alone does not establish a cause.",
+            scope="UNKNOWN",
+            cause_unknown=True,
+            evidence_character="UNKNOWN",
+            confidence=0.2,
+            posture="WAIT_FOR_CLARITY",
+        ),
+        sources=(
+            EvidenceSource(
+                reference="signal:market-1",
+                title="ACME saved signal",
+                identity="market-1",
+                kind="packet",
+                published_at=MARKET_TIME,
+                retrieved_at=MARKET_TIME,
+            ),
+        ),
+        model_version="gpt-5.4-mini-2026-03-17",
+        prompt_version="research-v1",
+        attempt_id="research:test",
+        packet_as_of=EVENT_TIME,
+        usage=ResearchUsage(),
+    )
+    report = ResearchReport(
+        report_id="report:event-1:2",
+        event_id=EVENT.event_id,
+        event_update=EVENT.current_update,
+        ticker=EVENT.ticker,
+        event_occurred_at=EVENT.created_at,
+        created_at=EVENT.updated_at,
+        summary=details.analysis.summary,
+        is_fake=False,
+        details=details,
+    )
+
+    with caplog.at_level(logging.INFO, logger="investment_assistant.reporting"):
+        emit_console_notification(EVENT, report)
+
+    notification_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "investment_assistant.reporting"
+        and record.getMessage().startswith(EVENT_NOTIFICATION_PREFIX)
+    ]
+    assert notification_messages == [
+        f"{EVENT_NOTIFICATION_PREFIX} | ticker=ACME | event_id=event-1 | "
+        f"update=2 | posture=WAIT_FOR_CLARITY | "
+        f"uncertainty=Price movement alone does not establish a cause. | "
+        f"sources=signal:market-1 | report={report.summary}"
+    ]
+    assert FAKE_RESEARCH_PREFIX not in report.summary

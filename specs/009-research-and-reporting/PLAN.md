@@ -1,8 +1,8 @@
 # Implementation Plan: Research and Reporting
 
-**Document status:** Proposed
+**Document status:** In implementation
 
-**Implementation status:** Not started
+**Implementation status:** Tasks 1–9 complete; task 10 pending
 
 Behavior and fixed limits belong to [SPEC.md](SPEC.md). Track implementation
 and validation in [TASKS.md](TASKS.md).
@@ -38,10 +38,11 @@ remain feature-level choices in the spec.
 | `config.Settings` | Add the optional SEC user-agent; reuse the existing OpenAI key. |
 | `clock.Clock` | Retain UTC timestamps and inject an elapsed-time function separately for deadlines. |
 
-`process_pending` currently drains all pending events, and `main` defaults to
-the fake researcher even in live mode. Both need explicit live wiring. Preserve
-offline drain behavior and explicit researcher injection in tests. A missing
-production OpenAI key must select a deferred state, never an implicit fake.
+`process_pending` still drains all pending events when `max_research_runs` is
+omitted. Live mode passes `max_research_runs=1` and constructs the real
+researcher while storage is open. Preserve offline drain behavior and explicit
+researcher injection in tests. A missing production OpenAI key selects a
+deferred state, never an implicit fake.
 
 ## Internal structure
 
@@ -52,6 +53,8 @@ Keep code under `src/investment_assistant/`. Introduce modules only when used:
 - `research_model.py`: OpenAI Responses transport, request schema, and conversion
   from provider responses to internal report drafts and tool requests.
 - `sec.py`: ticker-to-CIK lookup, submissions metadata, and safe filing excerpts.
+- `research_http.py`: shared size-bounded HTTP and elapsed deadline enforcement
+  for the two research adapters; no retries or redirects.
 - Extend `models.py`, `storage.py`, `event_manager.py`, `reporting.py`, and
   `main.py` for the contracts and integration described above.
 
@@ -62,7 +65,8 @@ required deadline; do not introduce an agent framework or background worker.
 
 ## Data and migration
 
-The existing database version is 4. Add one atomic forward migration:
+Database version 5 now migrates version 4 atomically (and retains the earlier
+migration paths). The implemented foundation includes:
 
 - Keep report identity, summary, timestamps, `is_fake`, and the unique event/update
   constraint. Add a schema-versioned JSON details column for the validated live
@@ -113,6 +117,98 @@ Require strict live report fields and list/text bounds. Keep optional legacy
 details confined to fake-report compatibility so they cannot weaken production
 validation. Use malformed, unrelated, and fabricated citation fixtures to prove
 rejection. Test unknown-cause reports with only local trigger evidence.
+
+## Implemented foundation (tasks 2–4)
+
+`models.py` contains closed, bounded packet, evidence, report-draft, live-report,
+attempt, and deferral contracts. `ResearchReport.details` is mandatory for live
+reports and absent for legacy fakes. `research.py` builds a consistent local
+packet and resolves draft references through the application-owned source registry.
+`SQLiteStorage` reserves starts, stores normalized evidence, selects retry-eligible
+work, and atomically saves a report with successful attempt state. The existing
+event-manager boundary can exercise these paths with an injected researcher;
+production live wiring is implemented in tasks 8–9.
+
+New news signals store article ID and classifier model/prompt versions. Old
+signals with no link remain explicit evidence gaps; no headline matching or
+backfilled citations are used. Article text's 4,000-character allowance includes
+headline, summary, and content. If only a later revision is stored, a historical
+packet omits it; a later packet labels the revision and keeps the original signal.
+Packet size trimming removes oldest optional article text, then oldest bar rows
+and their source entries. Omitted counts remain in the packet. Prior reports are
+marked historical interpretation and do not count as corroborating sources.
+
+The task 2–4 tests cover packet → validated report → atomic save → notification,
+including restart after failed delivery. They make no model or provider calls.
+Research-start limits and retry selection are available in storage. Automatic
+live scheduling and post-research market recovery are implemented in tasks 8–9.
+
+## Implemented adapters and runner (tasks 5–7)
+
+`SecClient` caches ticker metadata and serializes requests with a half-second
+minimum start spacing. Each `SecSession` owns only the filing IDs returned in
+that run. Unsupported forms, dates, paths, oversized metadata, unavailable user
+agent, and provider failures return bounded unavailable results. Excerpts strip
+markup/scripts and preserve truncation. All redirects are rejected, including
+same-host redirects, to retain the one-request tool boundary. Retry-After seconds
+and HTTP dates defer further SEC requests across runs in the process.
+
+`OpenAIResearchModel` uses the pinned model and prompt, strict `ReportDraft`
+schema, `store=false`, a 4,000-token output cap, and a remaining hosted-search cap.
+It parses every response item. Returned URL citations/source metadata become
+stable web references; invented report URLs never enter the evidence registry.
+Opaque reasoning is retained only in memory for stateless continuation. It is
+neither logged nor persisted. More than 20 normalized tool sources fail safely
+under the existing attempt snapshot contract; the report also has its own
+20-source limit.
+
+`ResearchRunner` implements the existing event/signals callable and returns a
+validated report for the event manager's atomic save. It reserves a durable
+attempt before calls, captures the packet, persists evidence and usage, deduplicates
+EDGAR functions, accounts for invalid requests, and supplies a result for every
+function call ID. The first exhausted cap forces one no-tool final turn, unless
+a valid report is already available. Fourth-turn function requests receive limit
+results. Missing configuration or exhausted starts defer before provider calls;
+other failures finish the attempt with safe text and a retry time. HTTP execution
+counts and bounded normalized function results are retained alongside successful
+evidence, including on deadline failures. No schema-version migration is needed
+for the new optional JSON fields; older attempts load their defaults.
+
+The shared deadline starts before packet assembly and remains in force through
+final report validation and evidence persistence. Production research HTTP uses
+a scoped POSIX main-thread timer as well as socket timeouts to interrupt blocked
+DNS/connect/header/body operations. It fails closed on unsupported threads/platforms
+or an already active process timer. It creates no background worker, and restores
+the prior signal handler. Tests inject HTTP streams, monotonic time, and waits;
+no live network or real sleeps are needed. SEC's shorter per-request timeout can
+degrade to unavailable if the overall run still has time.
+
+The adapters and runner pass end-to-end tests through the existing event manager
+with fake HTTP responses. This implementation does not claim a live account-access
+smoke test.
+
+## Implemented live loop (tasks 8–9)
+
+Live mode constructs `ResearchRunner` while storage is open. A missing OpenAI key
+selects the deferred path; it never falls back to the fake researcher. Tests may
+still inject an explicit researcher. Offline fixtures keep the fake.
+
+`EventManager.process_pending` still drains every event once when
+`max_research_runs` is omitted. The live loop passes `max_research_runs=1`: it
+delivers every saved report awaiting notification first, then starts at most one
+fair research run. `ResearchDeferred` is not a processing failure. Interrupted
+attempts wait five minutes from their recorded start; a newer material update is
+immediately eligible. A stale result is discarded without a report or notify.
+
+After a research call, the live loop rechecks the provider session and recovers
+regular-minute gaps through `fill_minute_gap`. It does not reconnect a healthy
+socket because research occupied the loop. If research crosses the regular close,
+the socket is closed. Startup research and the existing post-subscription handoff
+compose without duplicate events or reports.
+
+`emit_console_notification` prints the validated summary. Live reports also
+include posture, uncertainty, and a compact source list. Fake reports keep their
+explicit label. Discord remains Milestone 7.
 
 ## Provider adapters and bounded execution
 

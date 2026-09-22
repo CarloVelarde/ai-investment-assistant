@@ -1,11 +1,12 @@
 # Tasks: Research and Reporting
 
-**Document status:** Proposed
+**Document status:** In implementation
 
-**Implementation status:** Not started
+**Implementation status:** Tasks 1–9 complete; task 10 pending
 
-This milestone adds live research and reporting. Implementation has not started;
-the tasks below describe the required work. Behavior belongs to
+This milestone adds live research and reporting. Tasks 1–9 are complete;
+end-to-end closeout remains pending.
+Behavior belongs to
 [SPEC.md](SPEC.md); implementation approach belongs to [PLAN.md](PLAN.md).
 
 ## Tasks
@@ -13,30 +14,30 @@ the tasks below describe the required work. Behavior belongs to
 - [x] 1. Prepare the spec, implementation plan, acceptance mapping, and roadmap
   link. Specify report/source contracts, provider ownership, fixed budgets,
   deadline behavior, legacy compatibility, and live-loop limitations.
-- [ ] 2. Add typed packet, evidence, report-draft, live-report, and attempt
+- [x] 2. Add typed packet, evidence, report-draft, live-report, and attempt
   contracts. Preserve explicit fake-report compatibility. Test field limits,
   enums, source references, identity validation, and unknown-cause reports.
-- [ ] 3. Add the SQLite migration, structured report details, durable attempt
+- [x] 3. Add the SQLite migration, structured report details, durable attempt
   reservations, deferrals, retry timing, and bounded evidence reads. Test older
   databases, atomic save, persistent budgets, and legacy completed reports.
-- [ ] 4. Build local evidence packets and the source registry. Test deterministic
+- [x] 4. Build local evidence packets and the source registry. Test deterministic
   selection, completed/as-of bars, news provenance, prior-report context,
   missing/revised records, packet limits, and secret exclusion.
-- [ ] 5. Add the SEC adapter and optional user-agent setting. Test CIK/submissions
+- [x] 5. Add the SEC adapter and optional user-agent setting. Test CIK/submissions
   normalization, filing-ID restrictions, bounded excerpts, redirects, pacing,
   rate-limit deferral, deadline/size limits, and safe unavailable results.
-- [ ] 6. Add the separate OpenAI research adapter and prompt/schema version.
+- [x] 6. Add the separate OpenAI research adapter and prompt/schema version.
   Test pinned model, `store=false`, allowed tools, strict output, built-in search
   caps and sources, bounded continuation, refusal, and safe provider failures.
-- [ ] 7. Implement the research runner with durable attempts, deadline and
+- [x] 7. Implement the research runner with durable attempts, deadline and
   call/token limits, duplicate EDGAR handling, one finalization, source-backed
   report validation, and normalized evidence snapshots. Test success, optional
   tool failure, bad references, exhaustion, late results, and replay with fakes.
-- [ ] 8. Wire the real researcher into live mode and extend pending processing
+- [x] 8. Wire the real researcher into live mode and extend pending processing
   with one attempt per pass, notification-only recovery, fair ordering, and
   restart-safe retry spacing. Test missing keys, exhausted daily budget,
   material updates, interrupted attempts, and stale result rejection.
-- [ ] 9. Add post-research market recovery and real console report rendering.
+- [x] 9. Add post-research market recovery and real console report rendering.
   Test startup/socket handoff, open-to-closed transitions, gap recovery without
   duplicate events, saved-report delivery retry, and retained fake labels.
 - [ ] 10. Run end-to-end deterministic scenarios and all repository checks.
@@ -76,4 +77,69 @@ the tasks below describe the required work. Behavior belongs to
 
 ## Validation record
 
-Specification preparation only. Implementation validation is pending tasks 2–10.
+Tasks 2–4 validated on 18 September 2026 with deterministic local tests:
+
+- Closed report schemas, field limits, unknown-cause reports, citation and identity
+  validation, and explicit fake-report compatibility.
+- SQLite version 5 migration, including supported versions 1–4; legacy completed
+  reports stay completed. Attempt reservations, daily budget, retry spacing,
+  deferrals, fair selection, and snapshots survive restart.
+- Atomic report/attempt save, transaction rollback, stale-update rejection, and
+  saved-report delivery retry through the existing event manager.
+- Bounded deterministic signals, completed/as-of bars, linked news and classifier
+  versions, later revisions, missing records, prior fake context, packet trimming,
+  required-content overflow, comparison-symbol deduplication, and secret exclusion.
+
+Repository checks: `uv run ruff format --check .`, `uv run ruff check .`,
+`uv run mypy src`, and `uv run pytest`. A writable temporary `UV_CACHE_DIR`
+is used in the sandbox. All four checks passed: 104 files formatted, Ruff clean,
+mypy clean across 24 source files, and 382 tests passed (26 new research tests).
+No live smoke or provider calls were performed. Full milestone acceptance,
+including production live research, remains pending tasks 8–10.
+
+
+Tasks 5–7 validated on 18 September 2026:
+
+- SEC ticker caching, bounded recent filings, approved filing IDs, markup stripping,
+  partial excerpts, redirects, safe errors, request pacing, Retry-After deferral,
+  and shared/per-request deadlines; optional user-agent configuration.
+- Pinned Responses request, strict schema, stateless opaque continuation, all
+  output items, normalized web citations, refusals, malformed output, token/body
+  limits, excess hosted calls, and safe provider failures.
+- Packet-only unknown cause, positive news-only and combined events, SEC and web
+  evidence, report-before-notify, durable snapshots, and restart behavior through
+  the existing event manager using fake HTTP.
+- Duplicate and invalid functions, matching results for denied call IDs, shrinking
+  search budgets, first-cap finalization, four tool turns plus one final turn,
+  no extra retry, missing keys, exhausted starts, stale results, input overflow,
+  late packet/model/tool results, and failure usage audit.
+- No raw provider errors, HTML, opaque reasoning, or API credentials are stored
+  as research evidence. No live provider calls or live smoke were performed.
+
+All four repository checks passed for tasks 5–7: 111 files passed format checks,
+Ruff was clean, mypy passed across 27 source files, and all 454 tests passed
+(72 additional tests since tasks 2–4). `git diff --check` also passed.
+
+Tasks 8–9 validated on 18 September 2026 with deterministic local tests:
+
+- Live `process_pending` delivers every saved report first, then starts at most
+  one fair research run. Offline drain behavior is unchanged.
+- Missing OpenAI keys and exhausted daily budgets defer without a provider call,
+  fake report, notification, or extra failure on later passes.
+- Interrupted attempts wait five minutes from recorded start; a newer material
+  update is immediately eligible; stale results are discarded.
+- Production live mode constructs `ResearchRunner` while storage is open. Live
+  mode without an OpenAI key writes no fake report. Injected test researchers
+  remain available.
+- Post-research REST minute recovery runs without reconnecting a healthy socket.
+  Startup research plus the post-subscription handoff, and research that crosses
+  the regular close, create no duplicate events or reports.
+- Console output includes posture, uncertainty, and a compact source list for
+  live reports, and keeps the explicit fake label for fixture reports. Saved
+  reports retry delivery without a second research run.
+
+All four repository checks passed for tasks 8–9: 112 files passed format checks,
+Ruff was clean, mypy passed across 27 source files, and all 467 tests passed
+(13 additional tests since tasks 5–7). `git diff --check` also passed. No live
+smoke or provider calls are part of pytest. Full milestone closeout remains
+task 10.

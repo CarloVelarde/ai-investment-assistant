@@ -32,6 +32,7 @@ from investment_assistant.market_data import (
     last_closed_session_date,
     live_cutoff,
 )
+from investment_assistant.models import Event, ResearchReport, Signal
 from investment_assistant.news import AlpacaNewsProvider, NewsProvider, UrllibNewsHttp
 from investment_assistant.news_classifier import (
     NewsClassifier,
@@ -48,9 +49,12 @@ from investment_assistant.pipeline import run_market_history
 from investment_assistant.reporting import (
     Notifier,
     Researcher,
-    create_fake_research_report,
     emit_console_notification,
 )
+from investment_assistant.research import ResearchRunner
+from investment_assistant.research_http import BoundedHttp
+from investment_assistant.research_model import OpenAIResearchModel
+from investment_assistant.sec import SecClient
 from investment_assistant.stock_stream import (
     StockStreamAuthError,
     WebsocketStockStreamTransport,
@@ -74,15 +78,16 @@ def main(
     loop: bool = True,
     max_cycles: int | None = None,
     sleeper: Callable[[float], None] | None = None,
-    researcher: Researcher = create_fake_research_report,
+    researcher: Researcher | None = None,
     notifier: Notifier = emit_console_notification,
 ) -> LiveIngestResult | None:
     """Start the application.
 
     Missing Alpaca keys keep the offline abrupt-drop fixture path. Live keys
     run backfill, bounded REST news polling, then one stock websocket,
-    after-close daily, and stale recovery in one process. Tests inject a fake
-    provider and set ``loop=False``.
+    after-close daily, and stale recovery in one process. Production live mode
+    constructs the real researcher; tests inject a fake researcher or provider
+    and set ``loop=False``.
     """
 
     settings = settings or get_settings()
@@ -164,7 +169,7 @@ def run_live_session(
     clock: Clock,
     loop: bool,
     sleeper: Callable[[float], None],
-    researcher: Researcher,
+    researcher: Researcher | None,
     notifier: Notifier,
     max_cycles: int | None = None,
     news_provider: NewsProvider | None = None,
@@ -183,6 +188,7 @@ def run_live_session(
     with SQLiteStorage(settings.database_path) as storage:
         storage.initialize()
         manager = EventManager(storage, clock=clock)
+        live_researcher = researcher or build_live_researcher(storage, settings, clock)
         latest = backfill_and_replay(
             storage=storage,
             manager=manager,
@@ -206,12 +212,17 @@ def run_live_session(
             last_news_poll_at=last_news_poll_at,
             force=True,
         )
-        _process_pending_events(
+        latest, stream_connected = _process_pending_and_recover(
             manager,
-            researcher=researcher,
+            provider=provider,
+            storage=storage,
+            watchlist=watchlist,
+            clock=clock,
+            researcher=live_researcher,
             notifier=notifier,
+            latest=latest,
+            stream_connected=_stock_stream_is_open(provider, fallback=False),
         )
-        stream_connected = _stock_stream_is_open(provider, fallback=False)
         heartbeat_started_at = clock.now()
         while True:
             session = provider.get_session()
@@ -339,10 +350,16 @@ def run_live_session(
                 clock=clock,
                 last_news_poll_at=last_news_poll_at,
             )
-            _process_pending_events(
+            latest, stream_connected = _process_pending_and_recover(
                 manager,
-                researcher=researcher,
+                provider=provider,
+                storage=storage,
+                watchlist=watchlist,
+                clock=clock,
+                researcher=live_researcher,
                 notifier=notifier,
+                latest=latest,
+                stream_connected=stream_connected,
             )
             now = clock.now()
             if settings.heartbeat and heartbeat_is_due(
@@ -371,6 +388,28 @@ def run_live_session(
             ):
                 sleeper(LIVE_POLL_SECONDS)
     return latest
+
+
+def build_live_researcher(
+    storage: SQLiteStorage,
+    settings: Settings,
+    clock: Clock,
+) -> ResearchRunner:
+    """Compose production research. Missing keys defer; they never fake a report."""
+
+    http = BoundedHttp()
+    api_key = settings.openai_api_key.get_secret_value()
+    model = (
+        None
+        if not api_key
+        else OpenAIResearchModel(http=http, clock=clock, api_key=api_key)
+    )
+    return ResearchRunner(
+        storage=storage,
+        model=model,
+        sec=SecClient(http=http, clock=clock, user_agent=settings.sec_user_agent),
+        clock=clock,
+    )
 
 
 def build_news_provider(settings: Settings, clock: Clock) -> AlpacaNewsProvider:
@@ -499,10 +538,18 @@ def _process_pending_events(
     *,
     researcher: Researcher,
     notifier: Notifier,
-) -> None:
+) -> bool:
+    attempted = False
+
+    def tracked(event: Event, signals: tuple[Signal, ...]) -> ResearchReport:
+        nonlocal attempted
+        attempted = True
+        return researcher(event, signals)
+
     processed = manager.process_pending(
-        researcher=researcher,
+        researcher=tracked,
         notifier=notifier,
+        max_research_runs=1,
     )
     if processed:
         watch(
@@ -510,6 +557,52 @@ def _process_pending_events(
             events=len(processed),
             tickers=",".join(event.ticker for event in processed),
         )
+    return attempted
+
+
+def _process_pending_and_recover(
+    manager: EventManager,
+    *,
+    provider: MarketData,
+    storage: SQLiteStorage,
+    watchlist: tuple[str, ...],
+    clock: Clock,
+    researcher: Researcher,
+    notifier: Notifier,
+    latest: LiveIngestResult,
+    stream_connected: bool,
+) -> tuple[LiveIngestResult, bool]:
+    """Deliver reports, run at most one research attempt, then recover minutes."""
+
+    researched = _process_pending_events(
+        manager,
+        researcher=researcher,
+        notifier=notifier,
+    )
+    if not researched:
+        return latest, stream_connected
+    session = provider.get_session()
+    gap = fill_minute_gap(
+        storage=storage,
+        manager=manager,
+        provider=provider,
+        watchlist=watchlist,
+        clock=clock,
+    )
+    latest = _combine(latest, gap)
+    watch(
+        "Post-research minute gap filled",
+        bars=len(gap.persisted_bar_ids),
+        accepted=len(gap.accepted_signal_ids),
+        session_open=session.is_open,
+    )
+    if not session.is_open and (
+        stream_connected or _stock_stream_is_open(provider, fallback=False)
+    ):
+        _close_stock_stream(provider)
+        stream_connected = False
+        watch("Stock stream closed", reason="regular session closed")
+    return latest, stream_connected
 
 
 def _reconnect_if_dropped(
