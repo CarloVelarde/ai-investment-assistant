@@ -24,6 +24,7 @@ _SETTINGS_ENV = (
     "INVESTMENT_ASSISTANT_ALPACA_FEED",
     "INVESTMENT_ASSISTANT_ALPACA_TRADING_URL",
     "INVESTMENT_ASSISTANT_OPENAI_API_KEY",
+    "INVESTMENT_ASSISTANT_SEC_USER_AGENT",
     "INVESTMENT_ASSISTANT_WATCHLIST",
 )
 
@@ -326,11 +327,13 @@ def test_more_than_thirty_symbols_including_spy_are_rejected(
 
 def test_optional_sec_user_agent_is_loaded_and_trimmed(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _clear_settings_env(monkeypatch, tmp_path)
     monkeypatch.setenv(
         "INVESTMENT_ASSISTANT_SEC_USER_AGENT", "  Research contact@example.test  "
     )
-    settings = Settings(_env_file=None)
+    settings = Settings()
     assert settings.sec_user_agent == "Research contact@example.test"
     monkeypatch.delenv("INVESTMENT_ASSISTANT_SEC_USER_AGENT")
-    assert Settings(_env_file=None).sec_user_agent == ""
+    assert Settings().sec_user_agent == ""

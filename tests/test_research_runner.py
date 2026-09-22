@@ -2,18 +2,26 @@
 
 import json
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from investment_assistant.clock import FixedClock
 from investment_assistant.event_manager import EventManager
-from investment_assistant.models import EventStatus
+from investment_assistant.models import (
+    Event,
+    EventStatus,
+    EvidencePacket,
+    LiveReportDetails,
+    ResearchReport,
+)
 from investment_assistant.news_ingest import news_signal_from_classification
 from investment_assistant.research import ResearchDeferred, ResearchRunner
-from investment_assistant.research_http import ResearchError
+from investment_assistant.research_http import Deadline, HttpResult, ResearchError
 from investment_assistant.research_model import OpenAIResearchModel
 from investment_assistant.storage import SQLiteStorage
 from test_research_foundation import (
@@ -29,7 +37,14 @@ from test_research_model import completed, function, message, web
 from test_sec import ScriptedHttp, Timer, client, metadata, response, submissions
 
 
-def runner(storage, timer, model_http, sec_http=None, *, key=True):
+def runner(
+    storage: SQLiteStorage,
+    timer: Timer,
+    model_http: ScriptedHttp,
+    sec_http: ScriptedHttp | None = None,
+    *,
+    key: bool = True,
+) -> ResearchRunner:
     sec_http = sec_http or ScriptedHttp([])
     model = (
         OpenAIResearchModel(
@@ -46,16 +61,27 @@ def runner(storage, timer, model_http, sec_http=None, *, key=True):
     )
 
 
-def saved_attempt(path: Path):
+def saved_attempt(path: Path) -> Any:
     with sqlite3.connect(path) as connection:
         row = connection.execute(
             "SELECT details FROM research_attempts ORDER BY started_at DESC LIMIT 1"
         ).fetchone()
-        return None if row is None else json.loads(row[0])
+    assert row is not None
+    return json.loads(row[0])
 
 
-def payloads(http):
-    return [json.loads(call[3]) for call in http.calls]
+def _details(report: ResearchReport) -> LiveReportDetails:
+    assert report.details is not None
+    return report.details
+
+
+def payloads(http: ScriptedHttp) -> list[Any]:
+    loaded: list[Any] = []
+    for call in http.calls:
+        body = call[3]
+        assert body is not None
+        loaded.append(json.loads(body))
+    return loaded
 
 
 def test_packet_only_report_through_event_manager_and_restart(tmp_path: Path) -> None:
@@ -75,27 +101,31 @@ def test_packet_only_report_through_event_manager_and_restart(tmp_path: Path) ->
         storage.initialize()
         manager = EventManager(storage, clock=FixedClock(NOW))
         event = manager.handle_signal(SIGNAL).event
-        delivered = []
+        assert event is not None
+        delivered: list[ResearchReport] = []
 
-        def notify(current, report):
+        def notify(current: Event, report: ResearchReport) -> None:
             assert storage.get_report(report.report_id) == report
-            assert (
-                storage.get_research_attempt(report.details.attempt_id).status
-                == "SUCCEEDED"
-            )
+            assert report.details is not None
+            attempt = storage.get_research_attempt(report.details.attempt_id)
+            assert attempt is not None
+            assert attempt.status == "SUCCEEDED"
             delivered.append(report)
 
         manager.process_pending(
             researcher=runner(storage, timer, http), notifier=notify
         )
         assert len(delivered) == 1
+        assert delivered[0].details is not None
         assert delivered[0].details.analysis.cause_unknown
         assert delivered[0].details.usage.model_calls == 1
         assert delivered[0].details.usage.output_tokens == 200
         assert not delivered[0].is_fake
     with SQLiteStorage(path) as storage:
         storage.initialize()
-        assert storage.get_event(event.event_id).status == EventStatus.NOTIFIED
+        saved_event = storage.get_event(event.event_id)
+        assert saved_event is not None
+        assert saved_event.status == EventStatus.NOTIFIED
         EventManager(storage, clock=FixedClock(NOW)).process_pending(
             researcher=runner(storage, timer, http),
             notifier=lambda *args: pytest.fail("duplicate"),
@@ -185,8 +215,8 @@ def test_duplicates_and_invalid_calls_use_slots_but_do_not_repeat_http(
     with SQLiteStorage(path) as storage:
         seed(storage)
         report = runner(storage, timer, http, sec_http)(EVENT, (SIGNAL,))
-        assert report.details.usage.tool_slots == 6
-        assert report.details.usage.filing_list_calls == 1
+        assert _details(report).usage.tool_slots == 6
+        assert _details(report).usage.filing_list_calls == 1
     assert len(sec_http.calls) == 2
     outputs = [
         item
@@ -216,10 +246,8 @@ def test_unavailable_tool_result_is_deduplicated_and_persisted(tmp_path: Path) -
     with SQLiteStorage(path) as storage:
         seed(storage)
         report = runner(storage, timer, http)(EVENT, (SIGNAL,))
-        assert (
-            report.details.usage.filing_list_calls == 1
-            and report.details.usage.sec_http_calls == 0
-        )
+        usage = _details(report).usage
+        assert usage.filing_list_calls == 1 and usage.sec_http_calls == 0
     results = saved_attempt(path)["tool_results"]
     assert len(results) == 2 and results[0]["output"] == results[1]["output"]
     assert json.loads(results[0]["output"])["status"] == "unavailable"
@@ -239,8 +267,9 @@ def test_search_cap_forces_one_final_turn_and_denies_returned_edgar_calls(
     with SQLiteStorage(tmp_path / "search.db") as storage:
         seed(storage)
         report = runner(storage, Timer(), http)(EVENT, (SIGNAL,))
-        assert report.details.usage.web_search_calls == 3
-        assert report.details.usage.filing_list_calls == 0
+        usage = _details(report).usage
+        assert usage.web_search_calls == 3
+        assert usage.filing_list_calls == 0
     final = payloads(http)[1]
     assert final["tools"] == []
     assert json.loads(final["input"][-1]["output"])["status"] == "limit"
@@ -252,10 +281,8 @@ def test_valid_report_at_search_cap_stops_without_finalization(tmp_path: Path) -
     )
     with SQLiteStorage(tmp_path / "cap.db") as storage:
         seed(storage)
-        assert (
-            runner(storage, Timer(), http)(EVENT, (SIGNAL,)).details.usage.model_calls
-            == 1
-        )
+        report = runner(storage, Timer(), http)(EVENT, (SIGNAL,))
+        assert _details(report).usage.model_calls == 1
     assert len(http.calls) == 1
 
 
@@ -288,6 +315,7 @@ def test_four_tool_turns_then_exactly_one_finalization(tmp_path: Path) -> None:
     with SQLiteStorage(tmp_path / "rounds.db") as storage:
         seed(storage)
         report = runner(storage, Timer(), http)(EVENT, (SIGNAL,))
+        assert report.details is not None
         assert report.details.usage.model_calls == 5
     assert [bool(p["tools"]) for p in payloads(http)] == [True, True, True, True, False]
     assert json.loads(payloads(http)[-1]["input"][-1]["output"])["status"] == "limit"
@@ -302,7 +330,9 @@ def test_four_tool_turns_then_exactly_one_finalization(tmp_path: Path) -> None:
         {"status": "incomplete"},
     ],
 )
-def test_invalid_final_turn_never_gets_an_extra_chance(tmp_path: Path, last) -> None:
+def test_invalid_final_turn_never_gets_an_extra_chance(
+    tmp_path: Path, last: dict[str, Any]
+) -> None:
     path = tmp_path / "bad-final.db"
     http = ScriptedHttp([response(completed(web(), web(), web())), response(last)])
     with SQLiteStorage(path) as storage:
@@ -310,7 +340,9 @@ def test_invalid_final_turn_never_gets_an_extra_chance(tmp_path: Path, last) -> 
         with pytest.raises(ResearchError):
             runner(storage, Timer(), http)(EVENT, (SIGNAL,))
         assert storage.list_reports(EVENT.event_id) == ()
-        assert storage.get_event(EVENT.event_id).status == EventStatus.FAILED
+        failed = storage.get_event(EVENT.event_id)
+        assert failed is not None
+        assert failed.status == EventStatus.FAILED
     assert len(http.calls) == 2 and saved_attempt(path)["status"] == "FAILED"
     assert saved_attempt(path)["retry_not_before"] == (
         NOW + timedelta(minutes=5)
@@ -341,7 +373,9 @@ def test_unknown_citation_fails_with_no_report_or_notification(tmp_path: Path) -
             notifier=lambda *args: pytest.fail("must not notify"),
         )
         assert storage.list_reports(EVENT.event_id) == ()
-        assert storage.get_event(EVENT.event_id).status == EventStatus.FAILED
+        failed = storage.get_event(EVENT.event_id)
+        assert failed is not None
+        assert failed.status == EventStatus.FAILED
 
 
 def test_missing_model_and_budget_make_no_calls_and_no_additional_start(
@@ -378,8 +412,14 @@ def test_deadline_includes_packet_assembly_and_final_turn(
     timer = Timer()
     original = research.build_evidence_packet
 
-    def slow_packet(*args, **kwargs):
-        packet = original(*args, **kwargs)
+    def slow_packet(
+        storage: SQLiteStorage,
+        event_id: str,
+        event_update: int,
+        *,
+        as_of: datetime,
+    ) -> EvidencePacket:
+        packet = original(storage, event_id, event_update, as_of=as_of)
         timer.value += 91
         return packet
 
@@ -410,14 +450,32 @@ def test_stale_update_is_rejected_before_returning_report(tmp_path: Path) -> Non
         seed(storage)
 
         class UpdatingHttp(ScriptedHttp):
-            def request(self, *args, **kwargs):
+            def request(
+                self,
+                method: str,
+                url: str,
+                *,
+                headers: Mapping[str, str],
+                body: bytes | None,
+                deadline: Deadline,
+                timeout: float,
+            ) -> HttpResult:
                 storage.save_event(replace(EVENT, current_update=2))
-                return super().request(*args, **kwargs)
+                return super().request(
+                    method,
+                    url,
+                    headers=headers,
+                    body=body,
+                    deadline=deadline,
+                    timeout=timeout,
+                )
 
         http = UpdatingHttp([response(completed(message()))])
         with pytest.raises(ResearchError):
             runner(storage, Timer(), http)(EVENT, (SIGNAL,))
-        assert storage.get_event(EVENT.event_id).status == EventStatus.QUEUED
+        queued = storage.get_event(EVENT.event_id)
+        assert queued is not None
+        assert queued.status == EventStatus.QUEUED
         assert not storage.list_reports(EVENT.event_id)
 
 
@@ -434,8 +492,10 @@ def test_significant_positive_news_runs_independently_or_with_market(
         storage.save_news_classification(result)
         signal = news_signal_from_classification(item, result)
         if combined:
+            assert signal.direction is not None
             manager.handle_signal(replace(SIGNAL, direction=signal.direction))
         event = manager.handle_signal(signal).event
+        assert event is not None
         values = draft(f"signal:{signal.signal_id}").model_dump(mode="json")
         values["cause_unknown"] = False
         values["likely_explanation"] = {
@@ -480,12 +540,12 @@ def test_hosted_search_citations_are_saved_from_observed_metadata(
         seed(storage)
         report = runner(storage, Timer(), http)(EVENT, (SIGNAL,))
         assert storage.save_report_and_mark_reported(report, updated_at=NOW)
-        source = next(s for s in report.details.sources if s.kind == "web")
+        assert report.details is not None
+        source = next(item for item in report.details.sources if item.kind == "web")
         assert source.identity == url and source.title == "Company release"
-        assert (
-            storage.get_research_attempt(report.details.attempt_id).evidence[0].source
-            == source
-        )
+        attempt = storage.get_research_attempt(report.details.attempt_id)
+        assert attempt is not None
+        assert attempt.evidence[0].source == source
 
 
 def test_required_continuation_overflow_stops_before_second_request(
@@ -517,7 +577,7 @@ def test_duplicate_unavailable_list_does_not_retry_http(tmp_path: Path) -> None:
     with SQLiteStorage(tmp_path / "failed-sec.db") as storage:
         seed(storage)
         report = runner(storage, Timer(), http, sec_http)(EVENT, (SIGNAL,))
-        assert report.details.usage.sec_http_calls == 1
+        assert _details(report).usage.sec_http_calls == 1
     assert len(sec_http.calls) == 1
     assert "secret-provider-dump" not in json.dumps(payloads(http))
 

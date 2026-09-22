@@ -5,9 +5,11 @@ No network. The scripted model answers from the packet the application sent.
 
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,12 +17,18 @@ from investment_assistant.clock import FixedClock
 from investment_assistant.event_manager import EventManager
 from investment_assistant.market_metrics import RULE_RELATIVE_TO_SPY
 from investment_assistant.models import (
+    Event,
     EventStatus,
     EvidenceText,
+    LiveReportDetails,
     MarketSignal,
     MarketWindow,
+    NewsArticle,
     NewsCategory,
+    NewsClassification,
     NewsDirection,
+    NewsSignal,
+    ResearchReport,
 )
 from investment_assistant.news_ingest import news_signal_from_classification
 from investment_assistant.reporting import (
@@ -28,6 +36,7 @@ from investment_assistant.reporting import (
     FAKE_RESEARCH_PREFIX,
     emit_console_notification,
 )
+from investment_assistant.research_http import Deadline, HttpResult
 from investment_assistant.storage import SQLiteStorage
 from test_research_foundation import (
     NOW,
@@ -54,7 +63,16 @@ class PacketReportHttp(ScriptedHttp):
     def __init__(self) -> None:
         super().__init__([])
 
-    def request(self, method, url, *, headers, body, deadline, timeout):
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        body: bytes | None,
+        deadline: Deadline,
+        timeout: float,
+    ) -> HttpResult:
         packet = _packet(body)
         self.responses.append(response(completed(message(_draft_json(packet)))))
         return super().request(
@@ -67,14 +85,18 @@ class PacketReportHttp(ScriptedHttp):
         )
 
 
-def _packet(body: bytes | None) -> dict:
+def _packet(body: bytes | None) -> dict[str, Any]:
     assert body is not None
-    content = json.loads(body)["input"][0]["content"]
+    payload = json.loads(body)
+    assert isinstance(payload, dict)
+    content = payload["input"][0]["content"]
     assert isinstance(content, str)
-    return json.loads(content)
+    packet = json.loads(content)
+    assert isinstance(packet, dict)
+    return packet
 
 
-def _draft_json(packet: dict) -> str:
+def _draft_json(packet: dict[str, Any]) -> str:
     signal_ref = next(
         source["reference"]
         for source in packet["sources"]
@@ -125,7 +147,12 @@ def _draft_json(packet: dict) -> str:
     return report.model_dump_json()
 
 
-def _visible_report(report) -> str:
+def _details(report: ResearchReport) -> LiveReportDetails:
+    assert report.details is not None
+    return report.details
+
+
+def _visible_report(report: ResearchReport) -> str:
     details = report.details
     assert details is not None
     sources = " ".join(
@@ -135,28 +162,32 @@ def _visible_report(report) -> str:
     return "\n".join((report.summary, details.analysis.model_dump_json(), sources))
 
 
-def _news(ticker: str, index: int, direction: NewsDirection, **updates: object):
+def _news(
+    ticker: str,
+    index: int,
+    direction: NewsDirection,
+    *,
+    category: NewsCategory | None = None,
+    content: str = "Company publishes earnings.",
+) -> tuple[NewsArticle, NewsClassification, NewsSignal]:
     item = replace(
         article(index),
         symbols=(ticker,),
         headline=f"{ticker} earnings update",
-        content=str(updates.pop("content", "Company publishes earnings.")),
+        content=content,
     )
-    result = replace(
-        classification(item),
-        ticker=ticker,
-        direction=direction,
-        **updates,
-    )
+    result = replace(classification(item), ticker=ticker, direction=direction)
+    if category is not None:
+        result = replace(result, category=category)
     return item, result, news_signal_from_classification(item, result)
 
 
 def _research(
     storage: SQLiteStorage, http: ScriptedHttp, caplog: pytest.LogCaptureFixture
-):
-    delivered = []
+) -> list[ResearchReport]:
+    delivered: list[ResearchReport] = []
 
-    def notify(event, report) -> None:
+    def notify(event: Event, report: ResearchReport) -> None:
         assert storage.get_report(report.report_id) == report
         assert report.is_fake is False
         assert report.details is not None
@@ -176,6 +207,7 @@ def _research(
     ]
     assert len(messages) == len(delivered)
     for message_text, report in zip(messages, delivered, strict=True):
+        assert report.details is not None
         assert FAKE_RESEARCH_PREFIX not in message_text
         assert f"posture={report.details.analysis.posture}" in message_text
         assert f"uncertainty={report.details.analysis.uncertainty}" in message_text
@@ -192,17 +224,14 @@ def test_each_news_direction_produces_one_live_report(
         storage.initialize()
         manager = EventManager(storage, clock=FixedClock(NOW))
         cases = (
-            ("ACME", 0, NewsDirection.UP, {}),
-            ("BETA", 1, NewsDirection.DOWN, {}),
-            (
-                "CASA",
-                2,
-                NewsDirection.UNCLEAR,
-                {"category": NewsCategory.MACRO_SECTOR, "content": INJECTION},
-            ),
+            ("ACME", 0, NewsDirection.UP, None, "Company publishes earnings."),
+            ("BETA", 1, NewsDirection.DOWN, None, "Company publishes earnings."),
+            ("CASA", 2, NewsDirection.UNCLEAR, NewsCategory.MACRO_SECTOR, INJECTION),
         )
-        for ticker, index, direction, updates in cases:
-            item, result, signal = _news(ticker, index, direction, **updates)
+        for ticker, index, direction, category, content in cases:
+            item, result, signal = _news(
+                ticker, index, direction, category=category, content=content
+            )
             storage.save_news_article(item)
             storage.save_news_classification(result)
             handling = manager.handle_signal(signal)
@@ -212,15 +241,15 @@ def test_each_news_direction_produces_one_live_report(
         by_ticker = {report.ticker: report for report in delivered}
         assert set(by_ticker) == {"ACME", "BETA", "CASA"}
         assert (
-            by_ticker["ACME"].details.analysis.posture
+            _details(by_ticker["ACME"]).analysis.posture
             == "POTENTIAL_OPPORTUNITY_TO_REVIEW"
         )
-        assert by_ticker["BETA"].details.analysis.posture == "INVESTIGATE_FURTHER"
-        assert by_ticker["CASA"].details.analysis.posture == "WAIT_FOR_CLARITY"
+        assert _details(by_ticker["BETA"]).analysis.posture == "INVESTIGATE_FURTHER"
+        assert _details(by_ticker["CASA"]).analysis.posture == "WAIT_FOR_CLARITY"
         assert all(
             report.event_update == 1 and not report.is_fake for report in delivered
         )
-        assert all(not report.details.analysis.cause_unknown for report in delivered)
+        assert all(not _details(report).analysis.cause_unknown for report in delivered)
         casa = next(event for event in storage.list_events() if event.ticker == "CASA")
         assert casa.direction is None and casa.category == "MACRO_SECTOR"
         assert all(
@@ -255,8 +284,8 @@ def test_market_plus_news_is_one_event_and_one_current_report(
         delivered = _research(storage, http, caplog)
         assert len(delivered) == 1
         assert delivered[0].event_update == 2
-        assert delivered[0].details.analysis.scope == "COMPANY"
-        assert not delivered[0].details.analysis.cause_unknown
+        assert _details(delivered[0]).analysis.scope == "COMPANY"
+        assert not _details(delivered[0]).analysis.cause_unknown
         assert {
             report.event_update
             for report in storage.list_reports(handling.event.event_id)
@@ -283,7 +312,7 @@ def test_broad_market_comparison_can_report_an_unknown_company_cause(
         assert handling.event is not None and handling.event.current_update == 1
         delivered = _research(storage, http, caplog)
         assert len(delivered) == 1
-        analysis = delivered[0].details.analysis
+        analysis = _details(delivered[0]).analysis
         assert analysis.scope == "BROAD_MARKET"
         assert analysis.cause_unknown is True
         assert analysis.posture == "MONITOR"
@@ -324,9 +353,11 @@ def test_existing_eligibility_still_gates_a_second_report(
         caplog.clear()
         second = _research(storage, http, caplog)
         assert len(second) == 1 and second[0].event_update == 2
+        assert second[0].details is not None
         assert not second[0].details.analysis.cause_unknown
         reports = storage.list_reports(event_id)
         assert [report.event_update for report in reports] == [1, 2]
+        assert reports[0].details is not None
         assert reports[0].details.analysis.cause_unknown is True
         assert len(storage.list_events()) == 1
         assert len(storage.list_signals(event_id)) == 3
@@ -378,13 +409,17 @@ def test_prompt_injection_cannot_retarget_research_or_invent_a_source(
             notifier=lambda *_: pytest.fail("must not notify"),
         )
         assert storage.list_reports(handling.event.event_id) == ()
-        assert storage.get_event(handling.event.event_id).status is EventStatus.FAILED
+        failed = storage.get_event(handling.event.event_id)
+        assert failed is not None
+        assert failed.status is EventStatus.FAILED
     assert [call[1] for call in http.calls] == [
         OPENAI_RESPONSES_URL,
         OPENAI_RESPONSES_URL,
     ]
     assert not sec_http.calls
-    sent = json.loads(http.calls[0][3])
+    body = http.calls[0][3]
+    assert body is not None
+    sent = json.loads(body)
     assert [tool.get("name", tool["type"]) for tool in sent["tools"]] == [
         "web_search",
         "get_recent_filings",

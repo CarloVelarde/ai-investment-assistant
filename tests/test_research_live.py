@@ -1,5 +1,6 @@
 """Live research scheduling, recovery, and console delivery. No network."""
 
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -13,11 +14,19 @@ from investment_assistant.config import Settings
 from investment_assistant.event_manager import EventManager
 from investment_assistant.main import main
 from investment_assistant.market_data import MarketSession
-from investment_assistant.models import Event, EventStatus, MarketTimeframe, Signal
+from investment_assistant.models import (
+    Event,
+    EventStatus,
+    MarketBar,
+    MarketTimeframe,
+    ResearchReport,
+    Signal,
+)
 from investment_assistant.reporting import (
     FAKE_RESEARCH_PREFIX,
     create_fake_research_report,
 )
+from investment_assistant.research_http import Deadline, HttpResult
 from investment_assistant.storage import SQLiteStorage
 from test_regular_session_lifecycle import (
     AFTER_CLOSE,
@@ -33,16 +42,18 @@ from test_research_runner import runner
 from test_sec import ScriptedHttp, Timer, response
 
 
-def _research_calls(calls: list[str]):
-    def research(event: Event, signals: tuple[Signal, ...]):
+def _research_calls(
+    calls: list[str],
+) -> Callable[[Event, tuple[Signal, ...]], ResearchReport]:
+    def research(event: Event, signals: tuple[Signal, ...]) -> ResearchReport:
         calls.append(event.event_id)
         return create_fake_research_report(event, signals)
 
     return research
 
 
-def _notify_calls(calls: list[str]):
-    def notify(event: Event, report) -> None:
+def _notify_calls(calls: list[str]) -> Callable[[Event, ResearchReport], None]:
+    def notify(event: Event, report: ResearchReport) -> None:
         calls.append(event.event_id)
 
     return notify
@@ -77,9 +88,15 @@ def test_live_pass_notifies_saved_reports_and_researches_one_fair_event(
         )
         assert notified == [first.event_id, second.event_id]
         assert researched == [second.event_id]
-        assert storage.get_event(first.event_id).status is EventStatus.NOTIFIED
-        assert storage.get_event(second.event_id).status is EventStatus.NOTIFIED
-        assert storage.get_event(third.event_id).status is EventStatus.QUEUED
+        notified_event = storage.get_event(first.event_id)
+        researched_event = storage.get_event(second.event_id)
+        waiting_event = storage.get_event(third.event_id)
+        assert notified_event is not None
+        assert researched_event is not None
+        assert waiting_event is not None
+        assert notified_event.status is EventStatus.NOTIFIED
+        assert researched_event.status is EventStatus.NOTIFIED
+        assert waiting_event.status is EventStatus.QUEUED
 
 
 def test_failed_event_does_not_starve_unattempted_work(tmp_path: Path) -> None:
@@ -121,7 +138,9 @@ def test_interrupted_attempt_waits_five_minutes_then_retries(tmp_path: Path) -> 
             max_research_runs=1,
         )
         assert researched == [EVENT.event_id]
-        assert storage.get_event(EVENT.event_id).status is EventStatus.NOTIFIED
+        finished = storage.get_event(EVENT.event_id)
+        assert finished is not None
+        assert finished.status is EventStatus.NOTIFIED
 
 
 def test_missing_key_defers_without_report_failure_or_repeat_log(
@@ -167,7 +186,9 @@ def test_exhausted_daily_budget_defers_without_a_provider_call(
             notifier=lambda *_: pytest.fail("must not notify"),
             max_research_runs=1,
         )
-        assert storage.get_research_deferral(EVENT.event_id, 1).reason == "DAILY_BUDGET"
+        deferred = storage.get_research_deferral(EVENT.event_id, 1)
+        assert deferred is not None
+        assert deferred.reason == "DAILY_BUDGET"
         assert storage.list_reports(EVENT.event_id) == ()
         assert storage.research_starts_on(NOW) == 20
     assert not http.calls
@@ -184,7 +205,7 @@ def test_material_update_is_immediately_eligible_after_a_failed_attempt(
         storage.fail_research_attempt(attempt.attempt_id, finished_at=NOW)
         storage.save_event(replace(EVENT, current_update=2, status=EventStatus.QUEUED))
 
-        def research(event: Event, signals: tuple[Signal, ...]):
+        def research(event: Event, signals: tuple[Signal, ...]) -> ResearchReport:
             researched.append(event.current_update)
             return create_fake_research_report(event, signals)
 
@@ -204,9 +225,25 @@ def test_stale_result_is_rejected_with_no_report_or_notification(
         seed(storage)
 
         class UpdatingHttp(ScriptedHttp):
-            def request(self, *args, **kwargs):
+            def request(
+                self,
+                method: str,
+                url: str,
+                *,
+                headers: Mapping[str, str],
+                body: bytes | None,
+                deadline: Deadline,
+                timeout: float,
+            ) -> HttpResult:
                 storage.save_event(replace(EVENT, current_update=2))
-                return super().request(*args, **kwargs)
+                return super().request(
+                    method,
+                    url,
+                    headers=headers,
+                    body=body,
+                    deadline=deadline,
+                    timeout=timeout,
+                )
 
         http = UpdatingHttp([response(completed(message()))])
         EventManager(storage, clock=FixedClock(NOW)).process_pending(
@@ -216,7 +253,9 @@ def test_stale_result_is_rejected_with_no_report_or_notification(
         )
         assert notified == []
         assert storage.list_reports(EVENT.event_id) == ()
-        assert storage.get_event(EVENT.event_id).current_update == 2
+        current = storage.get_event(EVENT.event_id)
+        assert current is not None
+        assert current.current_update == 2
 
 
 def _live_settings(database_path: Path) -> Settings:
@@ -229,7 +268,7 @@ def _live_settings(database_path: Path) -> Settings:
     )
 
 
-def _after_close_history() -> tuple:
+def _after_close_history() -> tuple[MarketBar, ...]:
     days = (
         datetime(2026, 1, 26).date(),
         datetime(2026, 1, 27).date(),
@@ -288,7 +327,7 @@ def test_startup_research_and_socket_handoff_do_not_duplicate_events(
     researched: list[int] = []
     notified: list[int] = []
 
-    def research(event: Event, signals: tuple[Signal, ...]):
+    def research(event: Event, signals: tuple[Signal, ...]) -> ResearchReport:
         researched.append(event.current_update)
         return create_fake_research_report(event, signals)
 
@@ -321,7 +360,7 @@ def test_post_research_gap_fill_recovers_minutes_without_duplicate_events(
     database_path = tmp_path / "gap-fill.sqlite3"
     researched: list[int] = []
 
-    def research(event: Event, signals: tuple[Signal, ...]):
+    def research(event: Event, signals: tuple[Signal, ...]) -> ResearchReport:
         provider.add_history(extra)
         researched.append(event.current_update)
         return create_fake_research_report(event, signals)
@@ -362,7 +401,7 @@ def test_research_crossing_regular_close_closes_socket_without_reconnect(
     )
     database_path = tmp_path / "open-to-closed.sqlite3"
 
-    def research(event: Event, signals: tuple[Signal, ...]):
+    def research(event: Event, signals: tuple[Signal, ...]) -> ResearchReport:
         provider.set_session(closed)
         return create_fake_research_report(event, signals)
 
@@ -403,11 +442,11 @@ def test_saved_report_retries_delivery_with_fake_label_and_without_research(
     researched: list[str] = []
     delivered: list[str] = []
 
-    def research(event: Event, signals: tuple[Signal, ...]):
+    def research(event: Event, signals: tuple[Signal, ...]) -> ResearchReport:
         researched.append(event.event_id)
         raise AssertionError("saved reports must not research again")
 
-    def notify(event: Event, report) -> None:
+    def notify(event: Event, report: ResearchReport) -> None:
         delivered.append(report.summary)
         assert report.is_fake is True
         assert report.summary.startswith(FAKE_RESEARCH_PREFIX)

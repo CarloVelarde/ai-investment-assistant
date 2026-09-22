@@ -1,6 +1,7 @@
 """SEC evidence stays bounded, ticker-bound, and offline in tests."""
 
 import json
+from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from email.utils import format_datetime
 
@@ -33,7 +34,7 @@ class Timer:
 class ScriptedHttp:
     def __init__(
         self,
-        responses: list[HttpResult | Exception],
+        responses: Sequence[HttpResult | Exception],
         timer: Timer | None = None,
         elapsed: float = 0,
     ) -> None:
@@ -42,7 +43,16 @@ class ScriptedHttp:
         self.timer = timer
         self.elapsed = elapsed
 
-    def request(self, method, url, *, headers, body, deadline, timeout):
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        body: bytes | None,
+        deadline: Deadline,
+        timeout: float,
+    ) -> HttpResult:
         self.calls.append((method, url, dict(headers), body, timeout))
         if self.timer:
             self.timer.value += self.elapsed
@@ -154,7 +164,9 @@ def test_missing_or_invalid_user_agent_never_calls_http(agent: str) -> None:
         RuntimeError("secret key"),
     ],
 )
-def test_bad_metadata_is_safe_unavailable_without_retry(result) -> None:
+def test_bad_metadata_is_safe_unavailable_without_retry(
+    result: HttpResult | Exception,
+) -> None:
     timer = Timer()
     http = ScriptedHttp([result])
     output = (
@@ -177,7 +189,7 @@ def test_bad_metadata_is_safe_unavailable_without_retry(result) -> None:
     ],
 )
 def test_rate_limit_disables_later_runs_until_retry_after(
-    retry_after, expected
+    retry_after: str | None, expected: int
 ) -> None:
     timer = Timer()
     headers = {} if retry_after is None else {"Retry-After": retry_after}

@@ -62,7 +62,7 @@ INVESTMENT_ASSISTANT_LOG_JSON=false
 ```bash
 uv run ruff format --check .
 uv run ruff check .
-uv run mypy src
+uv run mypy
 uv run pytest
 ```
 
