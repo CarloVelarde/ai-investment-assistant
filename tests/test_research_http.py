@@ -1,7 +1,10 @@
 """HTTP boundary tests use injected streams and timers, never live network."""
 
+import signal
+from collections.abc import Iterator
 from contextlib import contextmanager
 from email.message import Message
+from types import TracebackType
 from urllib.error import HTTPError
 
 import pytest
@@ -11,6 +14,7 @@ from investment_assistant.research_http import (
     MAX_RESPONSE_BYTES,
     BoundedHttp,
     Deadline,
+    HttpResult,
     ResearchError,
     ResearchTimeout,
 )
@@ -28,13 +32,18 @@ class Stream:
         self.sizes: list[int] = []
         self.closed = False
 
-    def __enter__(self):
+    def __enter__(self) -> Stream:
         return self
 
-    def __exit__(self, *args):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         self.closed = True
 
-    def read1(self, size):
+    def read1(self, size: int) -> bytes:
         self.sizes.append(size)
         self.timer.value += self.drip
         part = self.body[:size]
@@ -43,13 +52,13 @@ class Stream:
 
 
 class Opener:
-    def __init__(self, result, timer, connect_delay=0):
+    def __init__(self, result: object, timer: Timer, connect_delay: float = 0) -> None:
         self.result = result
         self.timer = timer
         self.connect_delay = connect_delay
-        self.calls = []
+        self.calls: list[tuple[object, float]] = []
 
-    def open(self, request, timeout):
+    def open(self, request: object, timeout: float) -> object:
         self.calls.append((request, timeout))
         self.timer.value += self.connect_delay
         if isinstance(self.result, Exception):
@@ -57,7 +66,7 @@ class Opener:
         return self.result
 
 
-def request(timer):
+def request(timer: Timer) -> HttpResult:
     return BoundedHttp().request(
         "GET",
         "https://www.sec.gov/files/company_tickers.json",
@@ -74,7 +83,7 @@ def test_response_limit_reads_no_more_than_two_mib(
     timer = Timer()
     stream = Stream(b"x" * (MAX_RESPONSE_BYTES + 100), timer)
     opener = Opener(stream, timer)
-    monkeypatch.setattr(research_http, "build_opener", lambda *args: opener)
+    monkeypatch.setattr(research_http, "build_opener", lambda *_args: opener)
     result = request(timer)
     assert len(result.body) == MAX_RESPONSE_BYTES and result.truncated
     assert len(stream.body) == 100 and stream.closed
@@ -85,13 +94,13 @@ def test_response_limit_reads_no_more_than_two_mib(
 
 @pytest.mark.parametrize("phase", ["connect", "read"])
 def test_deadline_alarm_is_active_across_blocking_phases(
-    monkeypatch: pytest.MonkeyPatch, phase
+    monkeypatch: pytest.MonkeyPatch, phase: str
 ) -> None:
     timer = Timer()
-    active = []
+    active: list[float] = []
 
     @contextmanager
-    def interrupt(seconds):
+    def interrupt(seconds: float) -> Iterator[None]:
         active.append(seconds)
         try:
             yield
@@ -99,12 +108,13 @@ def test_deadline_alarm_is_active_across_blocking_phases(
             active.clear()
 
     class BlockingStream(Stream):
-        def read1(self, size):
+        def read1(self, size: int) -> bytes:
             assert active == [10]
             research_http._timeout_handler(0, None)
+            return b""
 
     class BlockingOpener(Opener):
-        def open(self, request, timeout):
+        def open(self, request: object, timeout: float) -> object:
             assert active == [10]
             if phase == "connect":
                 research_http._timeout_handler(0, None)
@@ -113,7 +123,7 @@ def test_deadline_alarm_is_active_across_blocking_phases(
     stream = BlockingStream(b"", timer)
     monkeypatch.setattr(research_http, "_interrupt_after", interrupt)
     monkeypatch.setattr(
-        research_http, "build_opener", lambda *args: BlockingOpener(stream, timer)
+        research_http, "build_opener", lambda *_args: BlockingOpener(stream, timer)
     )
     with pytest.raises(ResearchTimeout):
         request(timer)
@@ -128,10 +138,23 @@ def test_slow_drip_is_rejected_even_when_each_read_returns(
     timer = Timer()
     stream = Stream(b"x" * 150000, timer, drip=31)
     opener = Opener(stream, timer)
-    monkeypatch.setattr(research_http, "build_opener", lambda *args: opener)
+    monkeypatch.setattr(research_http, "build_opener", lambda *_args: opener)
     with pytest.raises(ResearchTimeout):
         request(timer)
     assert stream.closed
+
+
+class _StopsRedirects:
+    def redirect_request(
+        self,
+        req: object,
+        fp: object,
+        code: int,
+        msg: str,
+        headers: object,
+        newurl: str,
+    ) -> object:
+        return None
 
 
 def test_error_or_redirect_never_reads_body_or_follows_url(
@@ -142,9 +165,9 @@ def test_error_or_redirect_never_reads_body_or_follows_url(
     headers["Location"] = "https://evil.test/secret"
     error = HTTPError("https://www.sec.gov", 302, "redirect", headers, None)
     opener = Opener(error, timer)
-    handlers = []
+    handlers: list[_StopsRedirects] = []
 
-    def build(handler):
+    def build(handler: _StopsRedirects) -> Opener:
         handlers.append(handler)
         return opener
 
@@ -163,7 +186,7 @@ def test_transport_errors_are_safe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         research_http,
         "build_opener",
-        lambda *args: Opener(RuntimeError("secret token"), timer),
+        lambda *_args: Opener(RuntimeError("secret token"), timer),
     )
     with pytest.raises(ResearchError, match="HTTP request failed") as error:
         request(timer)
@@ -173,15 +196,15 @@ def test_transport_errors_are_safe(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_scoped_timer_restores_handler_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls = []
+    calls: list[tuple[object, ...]] = []
     old_handler = object()
-    monkeypatch.setattr(research_http.signal, "getitimer", lambda *args: (0, 0))
-    monkeypatch.setattr(research_http.signal, "getsignal", lambda *args: old_handler)
+    monkeypatch.setattr(signal, "getitimer", lambda *_args: (0.0, 0.0))
+    monkeypatch.setattr(signal, "getsignal", lambda *_args: old_handler)
     monkeypatch.setattr(
-        research_http.signal, "signal", lambda *args: calls.append(("handler", *args))
+        signal, "signal", lambda *_args: calls.append(("handler", *_args))
     )
     monkeypatch.setattr(
-        research_http.signal, "setitimer", lambda *args: calls.append(("timer", *args))
+        signal, "setitimer", lambda *_args: calls.append(("timer", *_args))
     )
     with pytest.raises(RuntimeError), research_http._interrupt_after(3):
         raise RuntimeError("safe fixture")
@@ -190,7 +213,7 @@ def test_scoped_timer_restores_handler_on_failure(
 
 
 def test_existing_alarm_cannot_be_overwritten(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(research_http.signal, "getitimer", lambda *args: (2, 0))
+    monkeypatch.setattr(signal, "getitimer", lambda *_args: (2.0, 0.0))
     with (
         pytest.raises(ResearchError, match="active process timer"),
         research_http._interrupt_after(3),

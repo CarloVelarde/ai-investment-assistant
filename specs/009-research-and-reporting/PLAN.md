@@ -302,7 +302,7 @@ Run all repository checks:
 ```bash
 uv run ruff format --check .
 uv run ruff check .
-uv run mypy src
+uv run mypy
 uv run pytest
 ```
 

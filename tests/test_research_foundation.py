@@ -26,7 +26,9 @@ from investment_assistant.models import (
     NewsDirection,
     ReportDraft,
     ResearchAttempt,
+    ResearchReport,
     ResearchUsage,
+    Signal,
     SignalDirection,
     SignalImportance,
     SourceDetails,
@@ -166,8 +168,12 @@ def test_packet_to_validated_report_atomic_save_and_restart(tmp_path: Path) -> N
         assert saved is not None and saved.details is not None
         assert saved.details.analysis.cause_unknown
         assert saved.details.sources[0].identity == "trigger-event-1"
-        assert storage.get_research_attempt(attempt.attempt_id).status == "SUCCEEDED"
-        assert storage.get_event(EVENT.event_id).status == EventStatus.REPORTED
+        stored_attempt = storage.get_research_attempt(attempt.attempt_id)
+        assert stored_attempt is not None
+        assert stored_attempt.status == "SUCCEEDED"
+        stored_event = storage.get_event(EVENT.event_id)
+        assert stored_event is not None
+        assert stored_event.status == EventStatus.REPORTED
         assert reserve(storage, now=NOW + timedelta(minutes=10)) is None
         assert storage.research_starts_on(NOW) == 1
         assert storage.next_research_event(now=NOW + timedelta(minutes=10)) is None
@@ -189,32 +195,49 @@ def test_packet_to_validated_report_atomic_save_and_restart(tmp_path: Path) -> N
     ],
 )
 def test_draft_rejects_invalid_fields(updates: dict[str, object]) -> None:
+    values = draft().model_dump()
+    values.update(updates)
     with pytest.raises(ValidationError):
-        draft(**updates)
+        ReportDraft.model_validate(values)
 
 
 def test_unknown_references_and_unsubstantiated_cause_rejected(tmp_path: Path) -> None:
     with SQLiteStorage(tmp_path / "research.db") as storage:
         seed(storage)
         packet = build_evidence_packet(storage, EVENT.event_id, 1, as_of=NOW)
-        kwargs = dict(
-            attempt_id="attempt",
-            created_at=NOW,
-            model_version="fake",
-            prompt_version="v1",
-            usage=ResearchUsage(),
-        )
         with pytest.raises(ValueError, match="unknown evidence"):
-            create_live_report(packet, draft("https://invented.invalid"), **kwargs)
+            create_live_report(
+                packet,
+                draft("https://invented.invalid"),
+                attempt_id="attempt",
+                created_at=NOW,
+                model_version="fake",
+                prompt_version="v1",
+                usage=ResearchUsage(),
+            )
         with pytest.raises(ValueError, match="corroboration"):
-            create_live_report(packet, draft(cause_unknown=False), **kwargs)
+            create_live_report(
+                packet,
+                draft(cause_unknown=False),
+                attempt_id="attempt",
+                created_at=NOW,
+                model_version="fake",
+                prompt_version="v1",
+                usage=ResearchUsage(),
+            )
         hypothesis = EvidenceText(
             text="Possible repricing, unconfirmed.",
             references=("signal:trigger-event-1",),
             is_hypothesis=True,
         )
         assert create_live_report(
-            packet, draft(cause_unknown=False, likely_explanation=hypothesis), **kwargs
+            packet,
+            draft(cause_unknown=False, likely_explanation=hypothesis),
+            attempt_id="attempt",
+            created_at=NOW,
+            model_version="fake",
+            prompt_version="v1",
+            usage=ResearchUsage(),
         )
         registry = SourceRegistry(packet.sources)
         with pytest.raises(ValueError, match="conflicting"):
@@ -236,7 +259,9 @@ def test_daily_budget_and_deferrals_survive_restarts(tmp_path: Path) -> None:
             attempt = reserve(storage, now=NOW + timedelta(minutes=5 * index))
             assert attempt is not None
         assert reserve(storage, now=NOW + timedelta(minutes=100)) is None
-        assert storage.get_research_deferral(EVENT.event_id, 1).reason == "DAILY_BUDGET"
+        budget = storage.get_research_deferral(EVENT.event_id, 1)
+        assert budget is not None
+        assert budget.reason == "DAILY_BUDGET"
     with SQLiteStorage(path) as storage:
         storage.initialize()
         assert storage.research_starts_on(NOW) == 20
@@ -252,22 +277,22 @@ def test_retry_delay_fair_ordering_and_new_update(tmp_path: Path) -> None:
         seed(storage)
         other = replace(EVENT, event_id="event-2")
         seed(storage, other)
-        assert storage.next_research_event(now=NOW).event_id == EVENT.event_id
+        first = storage.next_research_event(now=NOW)
+        assert first is not None
+        assert first.event_id == EVENT.event_id
         attempt = reserve(storage)
         assert attempt is not None
         storage.fail_research_attempt(
             attempt.attempt_id, finished_at=NOW + timedelta(minutes=1)
         )
         assert reserve(storage, now=NOW + timedelta(minutes=5)) is None
-        assert (
-            storage.next_research_event(now=NOW + timedelta(minutes=10)).event_id
-            == other.event_id
-        )
+        waiting = storage.next_research_event(now=NOW + timedelta(minutes=10))
+        assert waiting is not None
+        assert waiting.event_id == other.event_id
         assert reserve(storage, other) is not None
-        assert (
-            storage.next_research_event(now=NOW + timedelta(minutes=10)).event_id
-            == EVENT.event_id
-        )
+        retryable = storage.next_research_event(now=NOW + timedelta(minutes=10))
+        assert retryable is not None
+        assert retryable.event_id == EVENT.event_id
         newer = replace(EVENT, current_update=2)
         storage.save_event(newer)
         assert reserve(storage, newer, now=NOW + timedelta(minutes=1)) is not None
@@ -296,7 +321,9 @@ def test_stale_report_and_failure_cannot_overwrite_new_update(tmp_path: Path) ->
         storage.save_event(replace(EVENT, current_update=2))
         assert not storage.save_report_and_mark_reported(report, updated_at=NOW)
         storage.fail_research_attempt(attempt.attempt_id, finished_at=NOW)
-        assert storage.get_event(EVENT.event_id).status == EventStatus.QUEUED
+        queued = storage.get_event(EVENT.event_id)
+        assert queued is not None
+        assert queued.status == EventStatus.QUEUED
         assert storage.list_reports(EVENT.event_id) == ()
 
 
@@ -316,6 +343,7 @@ def test_atomic_save_rejects_fabricated_source_or_identity(tmp_path: Path) -> No
             prompt_version=attempt.prompt_version,
             usage=ResearchUsage(),
         )
+        assert report.details is not None
         for bad in (
             replace(report, ticker="OTHER"),
             replace(
@@ -333,13 +361,17 @@ def test_atomic_save_rejects_fabricated_source_or_identity(tmp_path: Path) -> No
         ):
             with pytest.raises(ValueError, match="persisted research"):
                 storage.save_report_and_mark_reported(bad, updated_at=NOW)
-            assert storage.get_research_attempt(attempt.attempt_id).status == "STARTED"
+            started = storage.get_research_attempt(attempt.attempt_id)
+            assert started is not None
+            assert started.status == "STARTED"
             assert storage.list_reports(EVENT.event_id) == ()
         # An insert failure after attempt finalization rolls the whole transaction back.
         storage.save_report(create_fake_research_report(EVENT, (SIGNAL,)))
         with pytest.raises(sqlite3.IntegrityError):
             storage.save_report_and_mark_reported(report, updated_at=NOW)
-        assert storage.get_research_attempt(attempt.attempt_id).status == "STARTED"
+        rolled_back = storage.get_research_attempt(attempt.attempt_id)
+        assert rolled_back is not None
+        assert rolled_back.status == "STARTED"
 
 
 def test_signal_selection_preserves_severity_and_windows(tmp_path: Path) -> None:
@@ -371,7 +403,9 @@ def test_signal_selection_preserves_severity_and_windows(tmp_path: Path) -> None
             s.signal_id for s in packet.signals
         }
         assert packet == build_evidence_packet(storage, EVENT.event_id, 1, as_of=NOW)
-        assert packet.signals[-1].observed_price == Decimal("94.000094")
+        last_signal = packet.signals[-1]
+        assert isinstance(last_signal, MarketSignal)
+        assert last_signal.observed_price == Decimal("94.000094")
 
 
 def test_bars_are_completed_available_and_end_before_cutoffs(tmp_path: Path) -> None:
@@ -499,10 +533,9 @@ def test_packet_limits_prior_fake_context_and_secret_exclusion(
         assert len(serialized) <= 40_000 and json.loads(serialized)
         assert len(packet.news) == 5 and packet.articles_omitted == 2
         assert packet.bar_rows_omitted > 0
-        assert (
-            packet.prior_report.is_fake
-            and packet.prior_report.historical_interpretation
-        )
+        prior = packet.prior_report
+        assert prior is not None
+        assert prior.is_fake and prior.historical_interpretation
         assert "never-serialize-this" not in serialized
         assert all(
             len(n.article.headline + n.article.summary + n.article.content) <= 4000
@@ -551,8 +584,12 @@ def test_v4_migration_preserves_completed_fake_and_pending_delivery(
     with SQLiteStorage(path) as storage:
         storage.initialize()
         assert storage.database_version == DATABASE_VERSION == 5
-        assert storage.get_report_for_update(EVENT.event_id, 1).is_fake
-        assert storage.get_event(EVENT.event_id).status == EventStatus.NOTIFIED
+        legacy = storage.get_report_for_update(EVENT.event_id, 1)
+        assert legacy is not None
+        assert legacy.is_fake
+        migrated = storage.get_event(EVENT.event_id)
+        assert migrated is not None
+        assert migrated.status == EventStatus.NOTIFIED
         assert storage.next_research_event(now=NOW) is None
         assert reserve(storage) is None
         assert storage.list_signals(EVENT.event_id)
@@ -565,8 +602,8 @@ def test_event_manager_delivers_persisted_live_report_and_retries_only_delivery(
     from investment_assistant.event_manager import EventManager
 
     path = tmp_path / "loop.db"
-    research_calls = []
-    delivered = []
+    research_calls: list[str] = []
+    delivered: list[ResearchReport] = []
     with SQLiteStorage(path) as storage:
         storage.initialize()
         manager = EventManager(storage, clock=FixedClock(NOW))
@@ -574,7 +611,7 @@ def test_event_manager_delivers_persisted_live_report_and_retries_only_delivery(
         event = result.event
         assert event is not None
 
-        def research(current, signals):
+        def research(current: Event, signals: tuple[Signal, ...]) -> ResearchReport:
             research_calls.append(current.event_id)
             attempt = reserve(storage, current)
             assert attempt is not None
@@ -592,7 +629,7 @@ def test_event_manager_delivers_persisted_live_report_and_retries_only_delivery(
                 usage=ResearchUsage(),
             )
 
-        def unavailable(current, report):
+        def unavailable(current: Event, report: ResearchReport) -> None:
             assert storage.get_report(report.report_id) == report
             raise RuntimeError("offline delivery unavailable")
 
@@ -603,7 +640,9 @@ def test_event_manager_delivers_persisted_live_report_and_retries_only_delivery(
         storage.initialize()
         manager = EventManager(storage, clock=FixedClock(NOW + timedelta(minutes=1)))
 
-        def must_not_research(current, signals):
+        def must_not_research(
+            current: Event, signals: tuple[Signal, ...]
+        ) -> ResearchReport:
             pytest.fail("saved report must not be researched again")
 
         manager.process_pending(
@@ -616,7 +655,9 @@ def test_event_manager_delivers_persisted_live_report_and_retries_only_delivery(
         )
         assert delivered == [saved]
         assert len(research_calls) == 1
-        assert storage.get_event(event.event_id).status == EventStatus.NOTIFIED
+        finished = storage.get_event(event.event_id)
+        assert finished is not None
+        assert finished.status == EventStatus.NOTIFIED
 
 
 def test_reconcile_saved_report_attempt_bookkeeping(tmp_path: Path) -> None:
@@ -644,8 +685,12 @@ def test_reconcile_saved_report_attempt_bookkeeping(tmp_path: Path) -> None:
         )
     with SQLiteStorage(path) as storage:
         storage.initialize()
-        assert storage.get_research_attempt(attempt.attempt_id).status == "SUCCEEDED"
-        assert storage.get_event(EVENT.event_id).status == EventStatus.REPORTED
+        reconciled = storage.get_research_attempt(attempt.attempt_id)
+        assert reconciled is not None
+        assert reconciled.status == "SUCCEEDED"
+        reported = storage.get_event(EVENT.event_id)
+        assert reported is not None
+        assert reported.status == EventStatus.REPORTED
         assert reserve(storage, now=NOW + timedelta(minutes=10)) is None
 
 

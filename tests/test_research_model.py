@@ -1,6 +1,7 @@
 """Responses request, parsing, source, and stateless continuation tests."""
 
 import json
+from typing import Any
 
 import pytest
 
@@ -21,7 +22,9 @@ from test_research_foundation import NOW, draft
 from test_sec import ScriptedHttp, Timer, response
 
 
-def message(text: str | None = None, annotations: list | None = None) -> dict:
+def message(
+    text: str | None = None, annotations: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     return {
         "type": "message",
         "role": "assistant",
@@ -38,7 +41,7 @@ def message(text: str | None = None, annotations: list | None = None) -> dict:
 
 def function(
     call_id: str = "call-1", name: str = "get_recent_filings", arguments: str = "{}"
-) -> dict:
+) -> dict[str, Any]:
     return {
         "type": "function_call",
         "call_id": call_id,
@@ -47,7 +50,9 @@ def function(
     }
 
 
-def web(kind: str = "search", sources: list | None = None) -> dict:
+def web(
+    kind: str = "search", sources: list[dict[str, str]] | None = None
+) -> dict[str, Any]:
     return {
         "type": "web_search_call",
         "id": "ws_1",
@@ -56,8 +61,10 @@ def web(kind: str = "search", sources: list | None = None) -> dict:
     }
 
 
-def completed(*items: dict, **extra: object) -> dict:
-    return {"status": "completed", "output": list(items), **extra}
+def completed(*items: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {"status": "completed", "output": list(items)}
+    payload.update(extra)
+    return payload
 
 
 def adapter(http: ScriptedHttp) -> OpenAIResearchModel:
@@ -79,7 +86,9 @@ def test_pinned_strict_request_and_finalization_without_tools() -> None:
         tools_enabled=True,
         deadline=Deadline.start(timer),
     )
-    payload = json.loads(http.calls[0][3])
+    body = http.calls[0][3]
+    assert body is not None
+    payload = json.loads(body)
     assert payload["model"] == RESEARCH_MODEL == "gpt-5.4-mini-2026-03-17"
     assert payload["store"] is False and payload["max_output_tokens"] == 4000
     assert payload["max_tool_calls"] == 2
@@ -152,6 +161,7 @@ def test_web_metadata_and_citations_normalize_without_invented_report_sources() 
     )
     assert len(turn.evidence) == 1
     assert turn.evidence[0].source.identity == "https://example.test/earnings"
+    assert turn.draft is not None
     assert turn.draft.market_context[0].references == (
         web_reference("https://example.test/earnings"),
     )
@@ -177,7 +187,7 @@ def test_web_metadata_and_citations_normalize_without_invented_report_sources() 
         completed({"type": "reasoning", "summary": []}),
     ],
 )
-def test_provider_failures_are_safe_and_never_retried(body: dict) -> None:
+def test_provider_failures_are_safe_and_never_retried(body: dict[str, Any]) -> None:
     http = ScriptedHttp([response(body)])
     with pytest.raises(ResearchError) as error:
         adapter(http).respond(
@@ -190,7 +200,9 @@ def test_provider_failures_are_safe_and_never_retried(body: dict) -> None:
 @pytest.mark.parametrize(
     "items", [[web(), web("find_in_page")], [web("open_page"), web()]]
 )
-def test_all_hosted_actions_count_against_requested_cap(items: list[dict]) -> None:
+def test_all_hosted_actions_count_against_requested_cap(
+    items: list[dict[str, Any]],
+) -> None:
     http = ScriptedHttp([response(completed(*items, function()))])
     with pytest.raises(ResearchError, match="search allowance"):
         adapter(http).respond(
@@ -207,7 +219,9 @@ def test_all_hosted_actions_count_against_requested_cap(items: list[dict]) -> No
         RuntimeError("test-secret"),
     ],
 )
-def test_transport_failure_and_response_size_are_bounded(result) -> None:
+def test_transport_failure_and_response_size_are_bounded(
+    result: HttpResult | Exception,
+) -> None:
     http = ScriptedHttp([result])
     with pytest.raises(ResearchError) as error:
         adapter(http).respond(
