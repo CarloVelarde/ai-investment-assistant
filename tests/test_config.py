@@ -322,3 +322,15 @@ def test_more_than_thirty_symbols_including_spy_are_rejected(
 
     with pytest.raises(ValidationError, match="may not exceed 30 symbols"):
         Settings()
+
+
+def test_optional_sec_user_agent_is_loaded_and_trimmed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "INVESTMENT_ASSISTANT_SEC_USER_AGENT", "  Research contact@example.test  "
+    )
+    settings = Settings(_env_file=None)
+    assert settings.sec_user_agent == "Research contact@example.test"
+    monkeypatch.delenv("INVESTMENT_ASSISTANT_SEC_USER_AGENT")
+    assert Settings(_env_file=None).sec_user_agent == ""

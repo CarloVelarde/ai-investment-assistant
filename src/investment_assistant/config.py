@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     alpaca_feed: Literal["iex", "sip"] = "iex"
     alpaca_trading_url: str = DEFAULT_ALPACA_TRADING_URL
     openai_api_key: SecretStr = SecretStr("")
+    sec_user_agent: str = ""
     watchlist: str = ""
 
     model_config = SettingsConfigDict(
@@ -67,7 +68,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    @field_validator("alpaca_api_key_id", "watchlist", mode="before")
+    @field_validator("alpaca_api_key_id", "watchlist", "sec_user_agent", mode="before")
     @classmethod
     def _strip_text(cls, value: object) -> object:
         if isinstance(value, str):

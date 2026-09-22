@@ -201,7 +201,12 @@ def test_after_close_restart_recovers_and_processes_without_socket(
             MarketTimeframe.ONE_MINUTE,
             datetime(2026, 2, 2, 14, 30, tzinfo=UTC),
             datetime(2026, 2, 2, 21, 0, tzinfo=UTC),
-        )
+        ),
+        (
+            MarketTimeframe.ONE_MINUTE,
+            SESSION_OPEN + timedelta(minutes=61),
+            datetime(2026, 2, 2, 21, 0, tzinfo=UTC),
+        ),
     ]
 
     with SQLiteStorage(database_path) as storage:
@@ -263,6 +268,11 @@ def test_post_subscription_gap_fill_closes_startup_handoff_once(
         (
             MarketTimeframe.ONE_MINUTE,
             baseline[-1].end_at,
+            crossing.end_at,
+        ),
+        (
+            MarketTimeframe.ONE_MINUTE,
+            crossing.end_at,
             crossing.end_at,
         ),
     ]

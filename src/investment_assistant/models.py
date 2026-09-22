@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import Annotated, Literal, Self
+
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 
 class SignalImportance(StrEnum):
@@ -432,6 +435,9 @@ class NewsSignal:
     direction: SignalDirection | None
     headline: str
     matched_phrase: str
+    article_id: str | None = None
+    classification_prompt_version: str | None = None
+    classification_model_version: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "signal_id", _non_blank(self.signal_id, "signal_id"))
@@ -514,6 +520,280 @@ class Event:
             raise ValueError("closed episode requires closed_at")
 
 
+# Research contracts use closed schemas at the model/storage boundary. Existing
+# offline dataclasses keep their constructor compatibility.
+class ResearchValue(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+
+type ResearchText = Annotated[str, Field(min_length=1, max_length=2000)]
+type ResearchID = Annotated[str, Field(min_length=1, max_length=300)]
+
+
+class EvidenceSource(ResearchValue):
+    reference: ResearchID
+    title: Annotated[str, Field(min_length=1, max_length=500)]
+    kind: Literal["packet", "news", "filing", "web"]
+    identity: Annotated[str, Field(min_length=1, max_length=2000)]
+    published_at: AwareDatetime | None
+    retrieved_at: AwareDatetime
+
+
+class EvidenceText(ResearchValue):
+    text: ResearchText
+    references: Annotated[tuple[ResearchID, ...], Field(min_length=1, max_length=20)]
+    is_hypothesis: bool = Field(strict=True)
+
+
+class ReportDraft(ResearchValue):
+    summary: Annotated[str, Field(min_length=1, max_length=1000)]
+    likely_explanation: EvidenceText
+    competing_explanations: Annotated[tuple[EvidenceText, ...], Field(max_length=10)]
+    market_context: Annotated[tuple[EvidenceText, ...], Field(max_length=10)]
+    bullish_considerations: Annotated[tuple[EvidenceText, ...], Field(max_length=10)]
+    bearish_considerations: Annotated[tuple[EvidenceText, ...], Field(max_length=10)]
+    missing_information: Annotated[tuple[ResearchText, ...], Field(max_length=10)]
+    uncertainty: ResearchText
+    scope: Literal["COMPANY", "SECTOR", "BROAD_MARKET", "MIXED", "UNKNOWN"]
+    cause_unknown: bool = Field(strict=True)
+    evidence_character: Literal["UNKNOWN", "POSSIBLY_TRANSIENT", "POSSIBLY_FUNDAMENTAL"]
+    confidence: Annotated[float, Field(ge=0, le=1, strict=True)]
+    posture: Literal[
+        "MONITOR",
+        "INVESTIGATE_FURTHER",
+        "POTENTIAL_OPPORTUNITY_TO_REVIEW",
+        "WAIT_FOR_CLARITY",
+    ]
+
+    def evidence_items(self) -> tuple[EvidenceText, ...]:
+        return (
+            self.likely_explanation,
+            *self.competing_explanations,
+            *self.market_context,
+            *self.bullish_considerations,
+            *self.bearish_considerations,
+        )
+
+
+class ResearchUsage(ResearchValue):
+    model_calls: Annotated[int, Field(ge=0, le=5, strict=True)] = 0
+    tool_slots: Annotated[int, Field(ge=0, le=6, strict=True)] = 0
+    web_search_calls: Annotated[int, Field(ge=0, le=3, strict=True)] = 0
+    filing_list_calls: Annotated[int, Field(ge=0, le=2, strict=True)] = 0
+    filing_excerpt_calls: Annotated[int, Field(ge=0, le=1, strict=True)] = 0
+    sec_http_calls: Annotated[int, Field(ge=0, le=5, strict=True)] = 0
+    input_tokens: Annotated[int, Field(ge=0, strict=True)] | None = None
+    output_tokens: Annotated[int, Field(ge=0, strict=True)] | None = None
+
+    @model_validator(mode="after")
+    def check_counts(self) -> Self:
+        if (
+            self.web_search_calls + self.filing_list_calls + self.filing_excerpt_calls
+            > self.tool_slots
+        ):
+            raise ValueError("executed tools exceed budget slots")
+        return self
+
+
+class LiveReportDetails(ResearchValue):
+    schema_version: Literal[1] = 1
+    company: Annotated[str, Field(min_length=1, max_length=300)] | None
+    triggering_signal_ids: Annotated[
+        tuple[ResearchID, ...], Field(min_length=1, max_length=50)
+    ]
+    analysis: ReportDraft
+    sources: Annotated[tuple[EvidenceSource, ...], Field(min_length=1, max_length=20)]
+    model_version: ResearchID
+    prompt_version: ResearchID
+    attempt_id: ResearchID
+    packet_as_of: AwareDatetime
+    usage: ResearchUsage
+
+    @model_validator(mode="after")
+    def check_references(self) -> Self:
+        registry = {source.reference: source for source in self.sources}
+        if len(registry) != len(self.sources):
+            raise ValueError("duplicate source reference")
+        references = {
+            ref for item in self.analysis.evidence_items() for ref in item.references
+        }
+        if not references <= registry.keys():
+            raise ValueError("unknown evidence reference")
+        if not any(
+            source.identity in self.triggering_signal_ids and source.kind == "packet"
+            for source in self.sources
+            if source.reference in references
+        ):
+            raise ValueError("report must cite an observed trigger")
+        explanation = self.analysis.likely_explanation
+        if (
+            not self.analysis.cause_unknown
+            and not explanation.is_hypothesis
+            and not any(
+                registry[ref].kind in ("news", "filing", "web")
+                for ref in explanation.references
+            )
+        ):
+            raise ValueError(
+                "claimed cause needs corroboration or a labeled hypothesis"
+            )
+        return self
+
+
+class PacketNews(ResearchValue):
+    article: NewsArticle
+    classifications: Annotated[tuple[NewsClassification, ...], Field(max_length=50)]
+    revised_since_signal: bool
+    text_truncated: bool = False
+
+
+class PriorReportContext(ResearchValue):
+    report_id: ResearchID
+    summary: Annotated[str, Field(min_length=1, max_length=2000)]
+    is_fake: bool
+    created_at: AwareDatetime
+    historical_interpretation: Literal[True] = True
+
+
+RESEARCH_QUESTIONS = (
+    "What happened?",
+    "What evidence most likely explains it?",
+    "Is it company-specific, sector, or broad market?",
+    "Could it be fundamental, or is that unknown?",
+    "What competing explanations are credible?",
+    "What is still missing?",
+    "Which permitted posture fits the evidence?",
+)
+
+
+class EvidencePacket(ResearchValue):
+    schema_version: Literal[1] = 1
+    event: Event
+    company: str | None = None
+    as_of: AwareDatetime
+    signals: Annotated[tuple[Signal, ...], Field(min_length=1, max_length=50)]
+    signal_total: Annotated[int, Field(ge=1)]
+    signals_omitted: Annotated[int, Field(ge=0)]
+    daily_bars: Annotated[tuple[MarketBar, ...], Field(max_length=50)] = ()
+    minute_bars: Annotated[tuple[MarketBar, ...], Field(max_length=120)] = ()
+    bar_rows_omitted: Annotated[int, Field(ge=0)] = 0
+    news: Annotated[tuple[PacketNews, ...], Field(max_length=5)] = ()
+    articles_omitted: Annotated[int, Field(ge=0)] = 0
+    prior_report: PriorReportContext | None = None
+    sources: tuple[EvidenceSource, ...]
+    gaps: tuple[ResearchText, ...] = ()
+    questions: tuple[str, ...] = RESEARCH_QUESTIONS
+    evidence_is_untrusted: Literal[True] = True
+
+    @model_validator(mode="after")
+    def check_packet(self) -> Self:
+        if self.signal_total != len(self.signals) + self.signals_omitted:
+            raise ValueError("signal counts disagree")
+        if any(
+            s.ticker != self.event.ticker
+            or s.occurred_at > self.as_of
+            or s.source_details.retrieved_at > self.as_of
+            for s in self.signals
+        ):
+            raise ValueError("signal is outside the captured event view")
+        if self.event.updated_at > self.as_of:
+            raise ValueError("event is newer than packet time")
+        symbols = {self.event.ticker, "SPY"}
+        latest_signal = max(signal.occurred_at for signal in self.signals)
+        for bars, timeframe, limit, cutoff in (
+            (self.daily_bars, MarketTimeframe.ONE_DAY, 25, self.as_of),
+            (self.minute_bars, MarketTimeframe.ONE_MINUTE, 60, latest_signal),
+        ):
+            if any(
+                not bar.is_complete
+                or bar.timeframe != timeframe
+                or bar.ticker not in symbols
+                or bar.end_at > cutoff
+                or bar.retrieved_at > self.as_of
+                for bar in bars
+            ):
+                raise ValueError("bar is outside the captured packet view")
+            if any(
+                sum(bar.ticker == symbol for bar in bars) > limit for symbol in symbols
+            ):
+                raise ValueError("packet exceeds per-symbol bar limits")
+        for item in self.news:
+            article = item.article
+            if (
+                max(article.created_at, article.updated_at, article.retrieved_at)
+                > self.as_of
+                or len(article.headline + article.summary + article.content) > 4000
+                or any(
+                    c.article_id != article.article_id
+                    or c.ticker != self.event.ticker
+                    or c.attempted_at > self.as_of
+                    for c in item.classifications
+                )
+            ):
+                raise ValueError("news is outside the captured packet view")
+        if len({source.reference for source in self.sources}) != len(self.sources):
+            raise ValueError("duplicate packet source reference")
+        if any(source.retrieved_at > self.as_of for source in self.sources):
+            raise ValueError("source is newer than packet time")
+        if self.prior_report is not None and self.prior_report.created_at > self.as_of:
+            raise ValueError("prior report is newer than packet time")
+        if len(self.model_dump_json()) > 40_000:
+            raise ValueError("required evidence packet exceeds 40000 characters")
+        return self
+
+
+class EvidenceSnapshot(ResearchValue):
+    source: EvidenceSource
+    text: Annotated[str, Field(max_length=8000)]
+    truncated: bool = False
+
+
+class ResearchToolResult(ResearchValue):
+    name: Literal["get_recent_filings", "get_filing_excerpt", "invalid"]
+    filing_id: Annotated[str, Field(max_length=100)] | None = None
+    output: Annotated[str, Field(max_length=8000)]
+
+
+class ResearchAttempt(ResearchValue):
+    attempt_id: ResearchID
+    event_id: ResearchID
+    event_update: Annotated[int, Field(ge=1, strict=True)]
+    started_at: AwareDatetime
+    finished_at: AwareDatetime | None = None
+    status: Literal["STARTED", "SUCCEEDED", "FAILED"] = "STARTED"
+    retry_not_before: AwareDatetime
+    model_version: ResearchID
+    prompt_version: ResearchID
+    packet: EvidencePacket | None = None
+    evidence: Annotated[tuple[EvidenceSnapshot, ...], Field(max_length=20)] = ()
+    tool_results: Annotated[tuple[ResearchToolResult, ...], Field(max_length=6)] = ()
+    usage: ResearchUsage = Field(default_factory=ResearchUsage)
+    safe_error: Annotated[str, Field(min_length=1, max_length=300)] | None = None
+
+    @model_validator(mode="after")
+    def check_attempt(self) -> Self:
+        if (self.status == "STARTED") != (self.finished_at is None):
+            raise ValueError("attempt status and finish time disagree")
+        if self.finished_at is not None and self.finished_at < self.started_at:
+            raise ValueError("attempt finish precedes start")
+        if self.packet is not None and (
+            self.packet.event.event_id != self.event_id
+            or self.packet.event.current_update != self.event_update
+        ):
+            raise ValueError("attempt packet identity mismatch")
+        if self.status == "FAILED" and self.safe_error is None:
+            raise ValueError("failed attempt needs a safe error")
+        return self
+
+
+class ResearchDeferral(ResearchValue):
+    event_id: ResearchID
+    event_update: Annotated[int, Field(ge=1, strict=True)]
+    reason: Literal["MISSING_KEY", "DAILY_BUDGET"]
+    deferred_at: AwareDatetime
+    retry_not_before: AwareDatetime | None
+
+
 @dataclass(frozen=True, slots=True)
 class ResearchReport:
     """Structured research output for one specific event update."""
@@ -526,6 +806,7 @@ class ResearchReport:
     created_at: datetime
     summary: str
     is_fake: bool
+    details: LiveReportDetails | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "report_id", _non_blank(self.report_id, "report_id"))
@@ -540,6 +821,18 @@ class ResearchReport:
         )
         object.__setattr__(self, "created_at", _as_utc(self.created_at, "created_at"))
         object.__setattr__(self, "summary", _non_blank(self.summary, "summary"))
+        if self.is_fake:
+            if self.details is not None:
+                raise ValueError("fake reports cannot carry live details")
+        else:
+            if self.details is None:
+                raise ValueError("live report requires validated details")
+            if self.report_id != f"report:{self.event_id}:{self.event_update}":
+                raise ValueError("live report identity mismatch")
+            if self.summary != self.details.analysis.summary:
+                raise ValueError("live report summary mismatch")
+            if self.created_at < self.details.packet_as_of:
+                raise ValueError("report creation precedes packet")
 
     @property
     def symbol(self) -> str:

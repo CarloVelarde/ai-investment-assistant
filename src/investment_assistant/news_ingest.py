@@ -303,6 +303,9 @@ def news_signal_from_classification(
         direction=_signal_direction(classification.direction),
         headline=article.headline,
         matched_phrase=classification.category.value,
+        article_id=article.article_id,
+        classification_prompt_version=classification.prompt_version,
+        classification_model_version=classification.model_version,
     )
 
 

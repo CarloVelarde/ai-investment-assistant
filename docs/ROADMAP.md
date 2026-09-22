@@ -4,15 +4,19 @@
 
 ## Current focus
 
-**Milestone 5 — Live news and classification** is complete under
-[spec 008](../specs/008-live-news-classification/SPEC.md).
-The next roadmap item is Milestone 6 — Research and reporting.
+**Milestone 6 — Research and reporting** is complete under
+[spec 009](../specs/009-research-and-reporting/SPEC.md). Deterministic tests
+cover bounded local evidence, SEC and OpenAI adapters, the research runner,
+one live research attempt per pass, post-research minute recovery, and console
+reports for news-only, combined, and broad-market cases. No live provider smoke
+was run. The next milestone is **Milestone 7 — Discord and operations**, which
+has not started.
 
 The live market loop (Milestones 4, [006](../specs/006-live-session-hardening/SPEC.md),
 and [007](../specs/007-regular-session-lifecycle/SPEC.md)), opt-in heartbeat / watch
 log ([spec 005](../specs/005-ops-visibility/SPEC.md)), and REST news classification
 are in. Spec 007 finished regular-session isolation, socket lifecycle, daily
-catch-up, and the startup REST-to-stream handoff before this news slice.
+catch-up, and the startup REST-to-stream handoff before news classification.
 
 ## Milestones
 
@@ -129,15 +133,29 @@ Add bounded Alpaca REST news polling, deterministic relevance and duplicate filt
 
 **Complete when:** significant news of either direction is processed once through the shared event manager without requiring a market trigger or researching every article.
 
-**Completed:** Bounded Alpaca REST news polling, deterministic watchlist/recency/source/identity/budget filters, and a small structured classifier on the news path only. Significant good, bad, or unclear news can create or enrich an event through the existing event manager. Rejected news creates no event or cooldown. The news websocket, real research, and Discord remain later work.
+**Completed:** Bounded Alpaca REST news polling, deterministic watchlist/recency/source/identity/budget filters, and a small structured classifier on the news path only. Significant good, bad, or unclear news can create or enrich an event through the existing event manager. Rejected news creates no event or cooldown. The news websocket and Discord stayed later work. Research followed in Milestone 6.
 
 ### Milestone 6 — Research and reporting
 
-**Status:** Not started
+**Status:** Complete
 
-Add evidence packets, bounded read-only tools, focused AI research, source tracking, and validated reports. Market-only research must allow an honest “cause unknown” result.
+**Spec:** [`specs/009-research-and-reporting/`](../specs/009-research-and-reporting/SPEC.md)
 
-**Complete when:** each eligible new or materially updated event produces one bounded report with citations, uncertainty, and a permitted research posture.
+The [plan](../specs/009-research-and-reporting/PLAN.md) and
+[tasks](../specs/009-research-and-reporting/TASKS.md) cover bounded local evidence,
+focused research with hosted search and SEC filings, validated cited reports,
+durable attempts, and live-loop integration. Console delivery remains in this
+slice; Discord stays in Milestone 7.
+
+**Completed:** Each eligible new or materially updated event can produce one
+bounded report with citations, uncertainty, and a permitted posture. Market-only
+and broad-market cases may say the cause is unknown. Significant positive,
+negative, and unclear news can each produce a report without a market signal,
+and market-plus-news stays one event. The event manager still decides eligibility.
+Live mode runs at most one research attempt per pass and prints the saved report
+on the console. Missing keys and provider failures do not write a fake report.
+No Discord adapter, worker, detector change, classifier change, or event-policy
+change was added. Automated checks use fakes only; no live smoke was run.
 
 ### Milestone 7 — Discord and operations
 

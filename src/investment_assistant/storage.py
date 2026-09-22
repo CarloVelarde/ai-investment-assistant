@@ -26,10 +26,12 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import TracebackType
+from typing import Literal
+from uuid import uuid4
 
 from investment_assistant.market_data import is_regular_session_minute
 from investment_assistant.models import (
@@ -37,7 +39,10 @@ from investment_assistant.models import (
     DetectorState,
     Event,
     EventStatus,
+    EvidencePacket,
+    EvidenceSnapshot,
     FailureStep,
+    LiveReportDetails,
     MarketBar,
     MarketSignal,
     MarketTimeframe,
@@ -49,14 +54,19 @@ from investment_assistant.models import (
     NewsSignal,
     NotificationAttempt,
     ProcessingFailure,
+    ResearchAttempt,
+    ResearchDeferral,
     ResearchReport,
+    ResearchToolResult,
+    ResearchUsage,
     Signal,
     SignalDirection,
     SignalImportance,
     SourceDetails,
+    _as_utc,
 )
 
-DATABASE_VERSION = 4
+DATABASE_VERSION = 5
 
 _MARKET_HISTORY_TABLES = """
 CREATE TABLE IF NOT EXISTS market_bars (
@@ -193,7 +203,10 @@ CREATE TABLE IF NOT EXISTS signals (
     comparison_return_ratio TEXT,
     news_category TEXT,
     headline TEXT,
-    matched_phrase TEXT
+    matched_phrase TEXT,
+    article_id TEXT,
+    classification_prompt_version TEXT,
+    classification_model_version TEXT
 );
 
 CREATE INDEX IF NOT EXISTS signals_event_id_idx ON signals(event_id);
@@ -211,6 +224,7 @@ CREATE TABLE IF NOT EXISTS reports (
     created_at TEXT NOT NULL,
     summary TEXT NOT NULL,
     is_fake INTEGER NOT NULL CHECK (is_fake IN (0, 1)),
+    details TEXT,
     UNIQUE (event_id, event_update)
 );
 
@@ -238,10 +252,34 @@ CREATE TABLE IF NOT EXISTS failures (
 );
 """
 
+
+_RESEARCH_TABLES = """
+CREATE TABLE IF NOT EXISTS research_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL REFERENCES events(event_id),
+    event_update INTEGER NOT NULL CHECK(event_update >= 1),
+    started_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    retry_not_before TEXT NOT NULL,
+    details TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS research_attempts_start_idx ON research_attempts(started_at);
+CREATE INDEX IF NOT EXISTS research_attempts_update_idx
+    ON research_attempts(event_id, event_update, started_at);
+CREATE TABLE IF NOT EXISTS research_deferrals (
+    event_id TEXT NOT NULL REFERENCES events(event_id),
+    event_update INTEGER NOT NULL CHECK(event_update >= 1),
+    details TEXT NOT NULL,
+    PRIMARY KEY(event_id, event_update)
+);
+CREATE INDEX IF NOT EXISTS research_signal_time_idx ON signals(event_id, occurred_at, signal_id);
+"""
+
 _SCHEMA = (
     _CORE_TABLES
     + _MARKET_HISTORY_TABLES
     + _NEWS_TABLES
+    + _RESEARCH_TABLES
     + f"\nPRAGMA user_version = {DATABASE_VERSION};\n"
 )
 
@@ -286,7 +324,7 @@ class SQLiteStorage:
         """Create or upgrade the layout, or validate the current version."""
 
         version = self.database_version
-        if version not in (0, 1, 2, 3, DATABASE_VERSION):
+        if version not in (0, 1, 2, 3, 4, DATABASE_VERSION):
             raise ValueError(f"unsupported SQLite database version: {version}")
         if version == 0:
             self._run_script_atomically(_SCHEMA)
@@ -299,7 +337,31 @@ class SQLiteStorage:
             version = 3
         if version == 3:
             self._migrate_v3_to_v4()
+            version = 4
+        if version == 4:
+            self._migrate_v4_to_v5()
         self._run_script_atomically(_SCHEMA)
+        self._reconcile_research_attempts()
+
+    def _reconcile_research_attempts(self) -> None:
+        """A saved report is authoritative if older bookkeeping was interrupted."""
+        with self.transaction():
+            rows = self._connection.execute(
+                """SELECT a.details AS attempt, r.details AS report, r.created_at
+                FROM research_attempts a JOIN reports r
+                ON r.event_id = a.event_id AND r.event_update = a.event_update
+                WHERE a.status = 'STARTED' AND r.details IS NOT NULL"""
+            ).fetchall()
+            for row in rows:
+                attempt = ResearchAttempt.model_validate_json(row["attempt"])
+                details = LiveReportDetails.model_validate_json(row["report"])
+                if details.attempt_id != attempt.attempt_id:
+                    continue
+                data = attempt.model_dump()
+                data.update(
+                    status="SUCCEEDED", finished_at=_datetime(row["created_at"])
+                )
+                self._write_research_attempt(ResearchAttempt.model_validate(data))
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -350,6 +412,23 @@ class SQLiteStorage:
 
     def _migrate_v3_to_v4(self) -> None:
         self._run_script_atomically(_NEWS_TABLES + "\nPRAGMA user_version = 4;\n")
+
+    def _migrate_v4_to_v5(self) -> None:
+        statements = []
+        for table, column in (
+            ("reports", "details"),
+            ("signals", "article_id"),
+            ("signals", "classification_prompt_version"),
+            ("signals", "classification_model_version"),
+        ):
+            if self._table_exists(table) and column not in self._column_names(table):
+                statements.append(f"ALTER TABLE {table} ADD COLUMN {column} TEXT;")
+        self._run_script_atomically(
+            "\n".join(statements)
+            + _CORE_TABLES
+            + _RESEARCH_TABLES
+            + "\nPRAGMA user_version = 5;"
+        )
 
     def _table_exists(self, table: str) -> bool:
         row = self._connection.execute(
@@ -538,9 +617,283 @@ class SQLiteStorage:
         ).fetchall()
         return tuple(_signal_from_row(row) for row in rows)
 
+    def get_research_attempt(self, attempt_id: str) -> ResearchAttempt | None:
+        row = self._connection.execute(
+            "SELECT details FROM research_attempts WHERE attempt_id = ?", (attempt_id,)
+        ).fetchone()
+        return None if row is None else ResearchAttempt.model_validate_json(row[0])
+
+    def research_starts_on(self, at: datetime) -> int:
+        day = at.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        row = self._connection.execute(
+            "SELECT COUNT(*) FROM research_attempts WHERE started_at >= ? AND started_at < ?",
+            (_timestamp(day), _timestamp(day + timedelta(days=1))),
+        ).fetchone()
+        return int(row[0])
+
+    def get_research_deferral(
+        self, event_id: str, event_update: int
+    ) -> ResearchDeferral | None:
+        row = self._connection.execute(
+            "SELECT details FROM research_deferrals WHERE event_id = ? AND event_update = ?",
+            (event_id, event_update),
+        ).fetchone()
+        return None if row is None else ResearchDeferral.model_validate_json(row[0])
+
+    def _defer_research(self, deferral: ResearchDeferral) -> None:
+        self._connection.execute(
+            """INSERT INTO research_deferrals(event_id, event_update, details)
+            VALUES (?, ?, ?) ON CONFLICT(event_id, event_update) DO UPDATE
+            SET details = excluded.details""",
+            (deferral.event_id, deferral.event_update, deferral.model_dump_json()),
+        )
+
+    def reserve_research_attempt(
+        self,
+        event_id: str,
+        event_update: int,
+        *,
+        now: datetime,
+        model_version: str,
+        prompt_version: str,
+        has_api_key: bool,
+    ) -> ResearchAttempt | None:
+        """Reserve a durable start before I/O; deferrals never consume a start."""
+        now = _as_utc(now, "now")
+        with self.transaction():
+            # Acquire SQLite's write lock before reading the shared daily ledger.
+            self._connection.execute(
+                "UPDATE research_attempts SET status = status WHERE 0"
+            )
+            event = self.get_event(event_id)
+            if (
+                event is None
+                or event.current_update != event_update
+                or event.status
+                not in (EventStatus.QUEUED, EventStatus.RESEARCHING, EventStatus.FAILED)
+                or self.get_report_for_update(event_id, event_update) is not None
+            ):
+                return None
+            if not has_api_key or self.research_starts_on(now) >= 20:
+                reason: Literal["MISSING_KEY", "DAILY_BUDGET"] = (
+                    "MISSING_KEY" if not has_api_key else "DAILY_BUDGET"
+                )
+                retry = (
+                    None
+                    if not has_api_key
+                    else now.replace(hour=0, minute=0, second=0, microsecond=0)
+                    + timedelta(days=1)
+                )
+                old = self.get_research_deferral(event_id, event_update)
+                if old is None or old.reason != reason or old.retry_not_before != retry:
+                    self._defer_research(
+                        ResearchDeferral(
+                            event_id=event_id,
+                            event_update=event_update,
+                            reason=reason,
+                            deferred_at=now,
+                            retry_not_before=retry,
+                        )
+                    )
+                return None
+            row = self._connection.execute(
+                """SELECT retry_not_before FROM research_attempts
+                WHERE event_id = ? AND event_update = ?
+                ORDER BY started_at DESC, attempt_id DESC LIMIT 1""",
+                (event_id, event_update),
+            ).fetchone()
+            if row is not None and _datetime(row[0]) > now:
+                return None
+            attempt = ResearchAttempt(
+                attempt_id=f"research:{uuid4()}",
+                event_id=event_id,
+                event_update=event_update,
+                started_at=now,
+                retry_not_before=now + timedelta(minutes=5),
+                model_version=model_version,
+                prompt_version=prompt_version,
+            )
+            self._connection.execute(
+                """INSERT INTO research_attempts
+                (attempt_id, event_id, event_update, started_at, status, retry_not_before, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    attempt.attempt_id,
+                    event_id,
+                    event_update,
+                    _timestamp(now),
+                    attempt.status,
+                    _timestamp(attempt.retry_not_before),
+                    attempt.model_dump_json(),
+                ),
+            )
+            self._connection.execute(
+                "DELETE FROM research_deferrals WHERE event_id = ? AND event_update = ?",
+                (event_id, event_update),
+            )
+            self.mark_researching(event_id, event_update, updated_at=now)
+            return attempt
+
+    def next_research_event(self, *, now: datetime) -> Event | None:
+        """Choose unattempted work first, then the least recently attempted update."""
+        row = self._connection.execute(
+            """SELECT e.* FROM events e
+            LEFT JOIN research_attempts a ON a.attempt_id = (
+                SELECT attempt_id FROM research_attempts
+                WHERE event_id = e.event_id AND event_update = e.current_update
+                ORDER BY started_at DESC, attempt_id DESC LIMIT 1)
+            WHERE e.status IN ('QUEUED', 'RESEARCHING', 'FAILED')
+              AND NOT EXISTS (SELECT 1 FROM reports r WHERE r.event_id = e.event_id
+                              AND r.event_update = e.current_update)
+              AND (a.retry_not_before IS NULL OR a.retry_not_before <= ?)
+            ORDER BY a.started_at IS NOT NULL, a.started_at, e.created_at, e.event_id LIMIT 1""",
+            (_timestamp(_as_utc(now, "now")),),
+        ).fetchone()
+        return None if row is None else _event_from_row(row)
+
+    def _write_research_attempt(self, attempt: ResearchAttempt) -> None:
+        self._connection.execute(
+            """UPDATE research_attempts SET status = ?, retry_not_before = ?, details = ?
+            WHERE attempt_id = ?""",
+            (
+                attempt.status,
+                _timestamp(attempt.retry_not_before),
+                attempt.model_dump_json(),
+                attempt.attempt_id,
+            ),
+        )
+
+    def save_research_evidence(
+        self,
+        attempt_id: str,
+        *,
+        packet: EvidencePacket,
+        evidence: tuple[EvidenceSnapshot, ...] = (),
+        usage: ResearchUsage | None = None,
+        tool_results: tuple[ResearchToolResult, ...] = (),
+    ) -> None:
+        """Store only normalized bounded input, never provider dumps or reasoning."""
+        with self.transaction():
+            attempt = self.get_research_attempt(attempt_id)
+            if attempt is None or attempt.status != "STARTED":
+                raise ValueError("research attempt is not active")
+            data = attempt.model_dump()
+            data.update(
+                packet=packet,
+                evidence=evidence,
+                usage=usage or attempt.usage,
+                tool_results=tool_results,
+            )
+            self._write_research_attempt(ResearchAttempt.model_validate(data))
+
+    def fail_research_attempt(self, attempt_id: str, *, finished_at: datetime) -> None:
+        """Finish with application-owned safe text and five-minute retry spacing."""
+        with self.transaction():
+            attempt = self.get_research_attempt(attempt_id)
+            if attempt is None or attempt.status != "STARTED":
+                raise ValueError("research attempt is not active")
+            data = attempt.model_dump()
+            data.update(
+                status="FAILED",
+                finished_at=finished_at,
+                retry_not_before=finished_at + timedelta(minutes=5),
+                safe_error="Research failed; the current update may be retried.",
+            )
+            self._write_research_attempt(ResearchAttempt.model_validate(data))
+            self._connection.execute(
+                """UPDATE events SET status = ?, updated_at = ?
+                WHERE event_id = ? AND current_update = ? AND status = 'RESEARCHING'
+                AND NOT EXISTS (SELECT 1 FROM reports WHERE event_id = ? AND event_update = ?)""",
+                (
+                    EventStatus.FAILED.value,
+                    _timestamp(finished_at),
+                    attempt.event_id,
+                    attempt.event_update,
+                    attempt.event_id,
+                    attempt.event_update,
+                ),
+            )
+
+    def read_research_signals(
+        self, event: Event, *, as_of: datetime
+    ) -> tuple[tuple[Signal, ...], int]:
+        """Bound reads while retaining evidence establishing severity and windows."""
+        where = "event_id = ? AND affected_update <= ? AND occurred_at <= ? AND retrieved_at <= ?"
+        args = (
+            event.event_id,
+            event.current_update,
+            _timestamp(as_of),
+            _timestamp(as_of),
+        )
+        total = int(
+            self._connection.execute(
+                f"SELECT COUNT(*) FROM signals WHERE {where}", args
+            ).fetchone()[0]
+        )
+        rows = self._connection.execute(
+            f"SELECT * FROM signals WHERE {where} ORDER BY occurred_at DESC, signal_id DESC LIMIT 50",
+            args,
+        ).fetchall()
+        mandatory: dict[str, Signal] = {}
+        for condition, value in [
+            ("importance", event.importance.value),
+            *(("market_window", w.value) for w in event.market_windows),
+        ]:
+            row = self._connection.execute(
+                f"SELECT * FROM signals WHERE {where} AND {condition} = ? ORDER BY occurred_at, signal_id LIMIT 1",
+                (*args, value),
+            ).fetchone()
+            if row is not None:
+                signal = _signal_from_row(row)
+                mandatory[signal.signal_id] = signal
+        selected = dict(mandatory)
+        for row in rows:
+            if len(selected) >= 50:
+                break
+            signal = _signal_from_row(row)
+            selected[signal.signal_id] = signal
+        return tuple(
+            sorted(selected.values(), key=lambda s: (s.occurred_at, s.signal_id))
+        ), total
+
+    def read_research_bars(
+        self,
+        ticker: str,
+        timeframe: MarketTimeframe,
+        *,
+        as_of: datetime,
+        end_at: datetime,
+    ) -> tuple[MarketBar, ...]:
+        rows = self._connection.execute(
+            """SELECT * FROM market_bars WHERE ticker = ? AND timeframe = ?
+            AND is_complete = 1 AND end_at <= ? AND retrieved_at <= ?
+            AND (timeframe != '1Min' OR is_regular_session_minute(start_at) = 1)
+            ORDER BY end_at DESC, bar_id DESC LIMIT ?""",
+            (
+                ticker,
+                timeframe.value,
+                _timestamp(min(as_of, end_at)),
+                _timestamp(as_of),
+                25 if timeframe == MarketTimeframe.ONE_DAY else 60,
+            ),
+        ).fetchall()
+        return tuple(_market_bar_from_row(row) for row in reversed(rows))
+
+    def previous_research_report(
+        self, event: Event, *, as_of: datetime
+    ) -> ResearchReport | None:
+        row = self._connection.execute(
+            """SELECT * FROM reports WHERE event_id = ? AND event_update < ? AND created_at <= ?
+            ORDER BY event_update DESC LIMIT 1""",
+            (event.event_id, event.current_update, _timestamp(as_of)),
+        ).fetchone()
+        return None if row is None else _report_from_row(row)
+
     def save_report(self, report: ResearchReport) -> None:
         """Persist one report for a specific event update."""
 
+        if not report.is_fake:
+            raise ValueError("live reports require the atomic lifecycle save")
         with self.transaction():
             self._write_report(report)
 
@@ -566,6 +919,8 @@ class SQLiteStorage:
             ).fetchone()
             if current is None:
                 return False
+            if report.details is not None:
+                self._complete_research_attempt(report, finished_at=updated_at)
             self._write_report(report)
             self._connection.execute(
                 """
@@ -581,6 +936,32 @@ class SQLiteStorage:
                 ),
             )
         return True
+
+    def _complete_research_attempt(
+        self, report: ResearchReport, *, finished_at: datetime
+    ) -> None:
+        from investment_assistant.research import create_live_report
+
+        assert report.details is not None
+        details = report.details
+        attempt = self.get_research_attempt(details.attempt_id)
+        if attempt is None or attempt.status != "STARTED" or attempt.packet is None:
+            raise ValueError("live report requires an active attempt with evidence")
+        expected = create_live_report(
+            attempt.packet,
+            details.analysis,
+            attempt_id=attempt.attempt_id,
+            created_at=report.created_at,
+            model_version=attempt.model_version,
+            prompt_version=attempt.prompt_version,
+            usage=attempt.usage,
+            evidence=attempt.evidence,
+        )
+        if expected != report:
+            raise ValueError("report does not match persisted research evidence")
+        data = attempt.model_dump()
+        data.update(status="SUCCEEDED", finished_at=finished_at)
+        self._write_research_attempt(ResearchAttempt.model_validate(data))
 
     def get_report(self, report_id: str) -> ResearchReport | None:
         """Reload a report by ID."""
@@ -1181,10 +1562,21 @@ class SQLiteStorage:
                 retrieved_at, signal_type, direction, market_rule,
                 market_window, price_decline_ratio, volume_ratio,
                 baseline_price, observed_price, comparison_return_ratio,
-                news_category, headline, matched_phrase
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                news_category, headline, matched_phrase, article_id,
+                classification_prompt_version, classification_model_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (*common_values, *specific_values),
+            (
+                *common_values,
+                *specific_values,
+                signal.article_id if isinstance(signal, NewsSignal) else None,
+                signal.classification_prompt_version
+                if isinstance(signal, NewsSignal)
+                else None,
+                signal.classification_model_version
+                if isinstance(signal, NewsSignal)
+                else None,
+            ),
         )
 
     def _write_report(self, report: ResearchReport) -> None:
@@ -1192,8 +1584,8 @@ class SQLiteStorage:
             """
             INSERT INTO reports (
                 report_id, event_id, event_update, ticker,
-                event_occurred_at, created_at, summary, is_fake
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                event_occurred_at, created_at, summary, is_fake, details
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 report.report_id,
@@ -1204,6 +1596,7 @@ class SQLiteStorage:
                 _timestamp(report.created_at),
                 report.summary,
                 int(report.is_fake),
+                None if report.details is None else report.details.model_dump_json(),
             ),
         )
 
@@ -1451,6 +1844,9 @@ def _report_from_row(row: sqlite3.Row) -> ResearchReport:
         created_at=_datetime(row["created_at"]),
         summary=str(row["summary"]),
         is_fake=bool(row["is_fake"]),
+        details=None
+        if row["details"] is None
+        else LiveReportDetails.model_validate_json(row["details"]),
     )
 
 
@@ -1597,6 +1993,13 @@ def _signal_from_row(row: sqlite3.Row) -> Signal:
             ),
             direction=None if direction is None else SignalDirection(direction),
             headline=_required(_optional_text(row["headline"]), "headline"),
+            article_id=_optional_text(row["article_id"]),
+            classification_prompt_version=_optional_text(
+                row["classification_prompt_version"]
+            ),
+            classification_model_version=_optional_text(
+                row["classification_model_version"]
+            ),
             matched_phrase=_required(
                 _optional_text(row["matched_phrase"]),
                 "matched_phrase",

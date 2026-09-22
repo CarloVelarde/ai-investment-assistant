@@ -18,6 +18,7 @@ from investment_assistant.models import (
     SignalDirection,
     SignalImportance,
 )
+from investment_assistant.research import ResearchDeferred
 from investment_assistant.storage import SQLiteStorage
 
 type DurableResearcher = Callable[[Event, tuple[Signal, ...]], ResearchReport]
@@ -60,18 +61,39 @@ class EventManager:
         *,
         researcher: DurableResearcher,
         notifier: DurableNotifier,
+        max_research_runs: int | None = None,
     ) -> tuple[Event, ...]:
-        """Process each saved event from its current durable stage."""
+        """Process saved reports, then pending research from durable state.
+
+        Offline callers omit ``max_research_runs`` and drain each event once.
+        Live mode delivers every ready notification first, then starts at most
+        one fair research run.
+        """
 
         results: list[Event] = []
         for event in self._storage.list_events():
             if event.status is EventStatus.NOTIFIED:
                 continue
-            result = self.process_event(
-                event.event_id,
-                researcher=researcher,
-                notifier=notifier,
-            )
+            if self._notification_ready(event):
+                result = self._notify(event, notifier)
+                if result is not None:
+                    results.append(result)
+                continue
+            if max_research_runs is None:
+                result = self.process_event(
+                    event.event_id,
+                    researcher=researcher,
+                    notifier=notifier,
+                )
+                if result is not None:
+                    results.append(result)
+        if max_research_runs is None:
+            return tuple(results)
+        for _ in range(max_research_runs):
+            candidate = self._storage.next_research_event(now=self._clock.now())
+            if candidate is None:
+                break
+            result = self._research(candidate, researcher, notifier)
             if result is not None:
                 results.append(result)
         return tuple(results)
@@ -88,7 +110,7 @@ class EventManager:
         event = self._storage.get_event(event_id)
         if event is None or event.status is EventStatus.NOTIFIED:
             return event
-        if event.status is EventStatus.REPORTED:
+        if self._notification_ready(event):
             return self._notify(event, notifier)
         if event.status is EventStatus.FAILED:
             failure = self._storage.get_latest_failure(
@@ -97,9 +119,22 @@ class EventManager:
             )
             if failure is None or not failure.retryable:
                 return event
-            if failure.step is FailureStep.NOTIFICATION:
-                return self._notify(event, notifier)
         return self._research(event, researcher, notifier)
+
+    def _notification_ready(self, event: Event) -> bool:
+        if event.status is EventStatus.REPORTED:
+            return True
+        if event.status is not EventStatus.FAILED:
+            return False
+        failure = self._storage.get_latest_failure(
+            event.event_id,
+            event.current_update,
+        )
+        return (
+            failure is not None
+            and failure.retryable
+            and failure.step is FailureStep.NOTIFICATION
+        )
 
     def _find_related_event(self, signal: Signal) -> Event | None:
         if isinstance(signal, MarketSignal):
@@ -190,6 +225,8 @@ class EventManager:
         try:
             report = researcher(started, signals)
             _validate_report(report, started)
+        except ResearchDeferred:
+            return self._storage.get_event(started.event_id)
         except Exception as error:
             failure = self._new_failure(started, FailureStep.RESEARCH, error)
             self._storage.save_failure_and_mark_failed(

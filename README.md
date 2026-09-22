@@ -34,10 +34,13 @@ Edit `.env` before a live run. Never commit `.env`.
 | Variable | Needed for | If blank |
 | --- | --- | --- |
 | `INVESTMENT_ASSISTANT_ALPACA_API_KEY_ID` and `INVESTMENT_ASSISTANT_ALPACA_API_SECRET_KEY` | Live market history, the stock socket, and Alpaca news retrieval | Offline fixture demo only |
-| `INVESTMENT_ASSISTANT_OPENAI_API_KEY` | Live news classification (whether a stored article becomes a news signal) | News is still fetched and saved; every candidate is deferred and no news event is created |
+| `INVESTMENT_ASSISTANT_OPENAI_API_KEY` | Live news classification and live research | News is still fetched and saved, but every candidate is deferred and no news signal is created. Queued research stays retryable and no report is written |
+| `INVESTMENT_ASSISTANT_SEC_USER_AGENT` | Optional contact string for SEC EDGAR during research | Filing tools return unavailable. Research can still use the local packet and web search |
 | `INVESTMENT_ASSISTANT_WATCHLIST` | Which names to watch (required in live mode) | Live start is rejected |
 
-Create an OpenAI key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) and paste it into `INVESTMENT_ASSISTANT_OPENAI_API_KEY`. Do that before a live news check; without it the app will not classify articles.
+Create an OpenAI key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) and paste it into `INVESTMENT_ASSISTANT_OPENAI_API_KEY`. Do that before a live news or research check. Without it the app will not classify articles or write a research report. It will not substitute a fake report.
+
+`INVESTMENT_ASSISTANT_SEC_USER_AGENT` is optional. When set, use a short contact string such as `Your Name you@example.com`. Leave it blank and filing lookups stay unavailable; the rest of research still runs. The finished report is printed to the console. Discord delivery is a later milestone.
 
 Alpaca keys come from your Alpaca account. Default feed is IEX.
 
