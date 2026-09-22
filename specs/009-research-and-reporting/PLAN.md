@@ -1,8 +1,8 @@
 # Implementation Plan: Research and Reporting
 
-**Document status:** In implementation
+**Document status:** Complete
 
-**Implementation status:** Tasks 1–9 complete; task 10 pending
+**Implementation status:** Tasks 1–10 complete
 
 Behavior and fixed limits belong to [SPEC.md](SPEC.md). Track implementation
 and validation in [TASKS.md](TASKS.md).
@@ -209,6 +209,21 @@ compose without duplicate events or reports.
 `emit_console_notification` prints the validated summary. Live reports also
 include posture, uncertainty, and a compact source list. Fake reports keep their
 explicit label. Discord remains Milestone 7.
+
+## Closeout (task 10)
+
+Deterministic scenarios now walk news-only reports for positive, negative, and
+unclear news, one combined market-plus-news report for the current update, a
+broad-market comparison that may say the company cause is unknown, and the
+existing eligibility rules (exact repeat, same-severity continuation, and
+material news). Prompt-injection text in an article cannot retarget the ticker,
+fetch an arbitrary filing URL, or become a cited source. Scope guards still
+exclude Discord, trading, workers, schedulers, and the news websocket. Research
+stays in this process and off the detector, classifier, and event-policy path.
+
+No opt-in live smoke was run. Pytest does not call Alpaca, OpenAI, or SEC.
+A later manual smoke, if someone chooses to run one, needs a disposable database
+and real keys and must stay out of the automated record.
 
 ## Provider adapters and bounded execution
 

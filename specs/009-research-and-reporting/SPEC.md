@@ -1,16 +1,18 @@
 # Feature Specification: Research and Reporting
 
-**Document status:** In implementation
+**Document status:** Complete
 
 **Milestone:** 6 — Research and reporting
 
-**Implementation status:** Tasks 1–9 complete; task 10 pending
+**Implementation status:** Complete
 
 Implementation approach: [PLAN.md](PLAN.md). Execution and acceptance coverage:
-[TASKS.md](TASKS.md). This feature implements the existing product and architecture decisions. The
-local evidence foundation, SEC/OpenAI adapters, bounded research runner, live-loop
-wiring, post-research recovery, and console rendering are implemented. End-to-end
-milestone closeout remains task 10. The milestone is not complete.
+[TASKS.md](TASKS.md). This feature implements the existing product and architecture
+decisions. Deterministic tests cover the local evidence packet, SEC and OpenAI
+adapters, the bounded runner, live-loop scheduling, post-research recovery, console
+rendering, and representative news-only, combined, and broad-market reports.
+No opt-in live smoke against Alpaca, OpenAI, or SEC was run; that check stays
+outside pytest. Discord remains Milestone 7.
 
 ## Purpose
 
@@ -381,7 +383,7 @@ configurable dollar budget remains Milestone 7.
   and `is_fake` is false.
 - [x] AC-03: A market-only event with no corroborating news or filing may
   persist `cause_unknown=true` and must not invent a cause or source.
-- [ ] AC-04: Significant news-only and market-plus-news events can each
+- [x] AC-04: Significant news-only and market-plus-news events can each
   produce one report for the current update without changing event-manager
   eligibility rules.
 - [x] AC-05: Web search and EDGAR tools are optional, bounded, read-only, and
@@ -400,7 +402,7 @@ configurable dollar budget remains Milestone 7.
 - [x] AC-09: Offline fixtures and pytest keep the fake researcher. Live mode
   without an OpenAI key writes no fake report. Pytest uses fakes for the
   model, tools, and clock.
-- [ ] AC-10: No Discord adapter, worker, detector change, classifier change,
+- [x] AC-10: No Discord adapter, worker, detector change, classifier change,
   or event-policy change is added. Ruff, mypy, and pytest pass.
 - [x] AC-11: One research attempt per live pass, notification-only recovery,
   fair selection, five-minute retry spacing, and post-research minute recovery
@@ -408,7 +410,7 @@ configurable dollar budget remains Milestone 7.
 - [x] AC-12: Attempt reservations, daily budgets, packet/evidence snapshots,
   and retry times survive restarts. Migration preserves existing fake reports
   and completed updates without reprocessing them.
-- [ ] AC-13: Unknown citations, arbitrary filing URLs, prompt-injection text,
+- [x] AC-13: Unknown citations, arbitrary filing URLs, prompt-injection text,
   oversized input/output, and late responses cannot bypass validation, tool
   limits, or the total deadline. Source metadata comes from observed evidence.
 

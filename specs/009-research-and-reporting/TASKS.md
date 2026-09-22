@@ -1,11 +1,12 @@
 # Tasks: Research and Reporting
 
-**Document status:** In implementation
+**Document status:** Complete
 
-**Implementation status:** Tasks 1–9 complete; task 10 pending
+**Implementation status:** Complete
 
-This milestone adds live research and reporting. Tasks 1–9 are complete;
-end-to-end closeout remains pending.
+This milestone adds live research and reporting. Tasks 1–10 are complete.
+Live smoke against Alpaca, OpenAI, and SEC is opt-in and is not part of pytest.
+No live smoke was run for this closeout.
 Behavior belongs to
 [SPEC.md](SPEC.md); implementation approach belongs to [PLAN.md](PLAN.md).
 
@@ -40,7 +41,7 @@ Behavior belongs to
 - [x] 9. Add post-research market recovery and real console report rendering.
   Test startup/socket handoff, open-to-closed transitions, gap recovery without
   duplicate events, saved-report delivery retry, and retained fake labels.
-- [ ] 10. Run end-to-end deterministic scenarios and all repository checks.
+- [x] 10. Run end-to-end deterministic scenarios and all repository checks.
   Document any opt-in live smoke separately, update owning docs and completion
   status only from evidence, and retain later-milestone scope guards.
 
@@ -143,3 +144,31 @@ Ruff was clean, mypy passed across 27 source files, and all 467 tests passed
 (13 additional tests since tasks 5–7). `git diff --check` also passed. No live
 smoke or provider calls are part of pytest. Full milestone closeout remains
 task 10.
+
+Task 10 validated on 21 September 2026 with deterministic local tests:
+
+- Significant positive, negative, and unclear news each produce one live report
+  for the current update without a market signal. Unclear news keeps a category
+  and no direction. Injected article text is sent as untrusted evidence and does
+  not become a source or change the ticker.
+- A market signal plus significant same-direction news stays one event and
+  produces one report for the current update.
+- A `relative_to_spy` comparison can report broad-market scope with
+  `cause_unknown` and no invented company cause.
+- Exact repeats and same-severity market continuation do not start another
+  research run. Significant news on a notified event still requeues one new
+  update and one new report.
+- An article that tells the model to research another ticker and cite an
+  arbitrary filing URL does not cause an SEC request. The invented citation is
+  rejected, no report is saved, and nothing is notified.
+- Scope guards still exclude Discord, brokerage, workers, schedulers, and the
+  news websocket. Detectors and the news classifier do not own research or
+  event promotion. The event manager does not call the research providers.
+
+Opt-in live smoke, recorded separately: not run. Pytest made no Alpaca, OpenAI,
+or SEC calls. A manual smoke would need a disposable database and real keys and
+is not evidence for the checks above.
+
+All four repository checks passed for task 10: 113 files passed format checks,
+Ruff was clean, mypy passed across 27 source files, and all 473 tests passed
+(6 additional tests since tasks 8–9). `git diff --check` also passed.
