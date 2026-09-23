@@ -123,7 +123,7 @@ D-026 adds a third evaluation in that same pipeline: a session-open gap check (p
 
 ### D-020 — Let material escalation bypass suppression
 
-This refines D-006: sustained movement belongs to one evolving episode, but a material update may justify a new report. Repeated evidence at the same severity is recorded without repeated research or notification; a worse severity, a newly crossed horizon, or significant new news may update and requeue the episode. Rejected inputs never start a cooldown, and notification cooldown begins only after successful delivery.
+This refines D-006: sustained movement belongs to one evolving episode, but a material update may justify a new report. Repeated evidence at the same severity is recorded without repeated research or notification; a worse severity, a newly crossed horizon, or significant new news may update and requeue the episode. Rejected inputs never start a cooldown, and notification cooldown begins only after successful delivery. D-032 clarifies that the MVP retains this successful-delivery history without adding a timer that changes eligibility.
 
 **Why:** Suppression should reduce noise without hiding meaningful deterioration or later explanations.
 
@@ -259,6 +259,67 @@ for that purpose while keeping ordinary retrieval and recovery on one simple,
 restart-safe path. Deferring the socket avoids concurrent connection lifecycle
 work until observed behavior shows it is worth the added complexity.
 
+### D-030 — Make delivery guarantees match the external boundary
+
+Milestone 7 claims a delivery durably before calling Discord and saves a returned
+message id before completing the event update. Known success is never resent.
+An unknown outcome permits one automatic resend after a persisted 15-minute wait,
+subject to longer provider waits and current-update/destination checks. Consume
+that allowance durably before I/O; restart never replenishes it. If this resend
+does not produce a durable receipt, stop automatic attempts and require operator
+resolution. This reflects the user's selected recovery tradeoff.
+
+A webhook does not provide an application idempotency key; a local unique index
+cannot prove exactly-once external delivery. The automatic resend or an explicitly
+authorized later retry may duplicate a message. Retain the same logical delivery id
+in its footer so duplicates are recognizable.
+
+Console delivery remains available without a webhook, records its destination,
+and does not count as Discord verification. Changing destinations does not replay
+already completed updates. Console logging itself is not transactional with SQLite.
+
+**Why:** This replaces the absolute duplicate-prevention wording in Product and
+Architecture with a recoverable, testable guarantee. Detailed states, retry rules,
+and recovery commands belong to spec 010. This is planned behavior, not a claim
+that the current console notifier already implements it.
+
+### D-031 — Reserve model use before I/O and label estimated cost honestly
+
+Milestone 7 makes configurable call ceilings and a shared estimated USD budget
+durable before model requests. Count failed and interrupted requests, include
+hosted-search fees and tokens, and retain conservative charges when usage is
+unknown. Delivery of saved reports is independent of model budget.
+
+The USD control governs this application's recorded estimates and reservations,
+not the provider invoice or other applications using the same account. Prices
+and reservation assumptions are versioned feature policy, with official sources.
+Do not describe unverified token allowances as hard worst-case billing bounds.
+
+**Why:** Post-response accounting loses costs on crashes. A nominal dollar limit
+without tool costs, reservations, and a stated estimation boundary is misleading.
+
+### D-032 — Finish the MVP through evidence, without adding unused controls
+
+Milestone 7 is spec 010 (delivery and operations); Milestone 8 is spec 011
+(full-loop hardening). Spec numbers and milestone numbers are separate sequences.
+The final gate requires deterministic replay, bounded live verification, and a
+documented result for each product success criterion. Feature implementation
+completion does not imply live-provider verification or full MVP readiness.
+
+Keep current material-update and routine-repeat behavior. No six-hour timer is
+added: routine repeats remain quiet indefinitely, material updates bypass
+suppression, and failures do not establish successful notification history.
+Any future time-based suppression rule needs a concrete behavior to suppress.
+This clarifies the cooldown wording in D-020 without changing event eligibility.
+
+The MVP configures a ticker watchlist, provider access, logging, notification
+destination, and bounded API-use controls. Owned/watched labels, cost basis,
+personal notes, adjustable detector thresholds, correlation windows, cooldown
+durations, and market-hours policies are later work, not unimplemented MVP gates.
+
+**Why:** Product configuration had outgrown the implemented and planned slices.
+Hardening must verify the core loop, not silently expand it into a portfolio tool.
+
 ## Rejected
 
 ### D-015 — Add a separate `RULES.md`
@@ -282,7 +343,6 @@ Decide these in the feature that first needs them:
 - Async worker and queue arrangement.
 - Model selection, prompts, and report wording. The split is fixed: inexpensive news classification vs later focused research (D-005, D-022). Exact model names stay feature-level.
 - Optional libraries, deployment, interfaces, and provider failover.
-- Strong live-delivery claim/recovery (for example mark delivery in progress before an external send, and reconcile “sent but not recorded”) when Discord and production notification land (Milestone 7). Milestone 2 only re-checks current update before notify and honors a refused notify save.
 - Exchange-calendar handling for holidays and early closes. Spec 007 keeps the
   existing fixed regular-session boundary and provider `is_open` clock; a full
   calendar is deferred until observed behavior requires it.
@@ -299,3 +359,6 @@ Resolved in feature specs / accepted decisions above when applicable:
 - Unfinished daily prices must not run after-close rules → D-027 and spec 006.
 - Regular-session minute isolation, socket-independent recovery, and latest
   completed daily catch-up → D-028 and spec 007.
+- Discord claims and uncertain-outcome recovery → D-030 and spec 010.
+- Durable estimated-cost reservations → D-031 and spec 010.
+- MVP scope and evidence required for completion → D-032 and spec 011.

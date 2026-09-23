@@ -47,12 +47,14 @@ flowchart LR
 
 ### Configuration
 
-The user can configure:
+The MVP configures a small ticker watchlist, provider credentials/feed, local
+database, logging, and notification destination. Milestone 7 adds lowerable
+model-call limits and an estimated model-cost budget. Detection, correlation,
+session boundaries, and repeat suppression use fixed feature-spec policies.
 
-- A small watchlist and whether each stock is owned or watched.
-- Optional cost basis and personal notes.
-- Detection thresholds, correlation windows, cooldowns, and market-hours behavior.
-- Notification preferences and API rate and cost limits.
+Owned/watched labels, cost basis, personal notes, configurable detector thresholds,
+correlation windows, cooldown durations, and market-hours policies are deferred
+(D-032). They are not required to finish the MVP.
 
 The application has no brokerage connection.
 
@@ -99,7 +101,7 @@ One event manager routes independent market and news signals into durable events
 - Duplicate articles and materially new evidence.
 - Abrupt movement, a large overnight or weekend gap, and gradual multi-day or multi-week movement.
 
-Sustained movement remains one evolving episode. Repeated evidence at the same severity is recorded quietly; a worse severity, a newly crossed horizon, or significant new news may justify another research run and notification. Events retain enough lifecycle state for deduplication, cooldowns, retries, and restart-safe processing.
+Sustained movement remains one evolving episode. Repeated evidence at the same severity is recorded quietly; a worse severity, a newly crossed horizon, or significant new news may justify another research run and notification. Events retain enough lifecycle state for deduplication, successful-notification history, retries, and restart-safe processing. The MVP does not add an elapsed-time cooldown: material updates stay eligible and routine repeats stay quiet regardless of elapsed time (D-032).
 
 ### When an event needs work
 
@@ -137,7 +139,13 @@ Allowed postures are:
 - `POTENTIAL_OPPORTUNITY_TO_REVIEW`
 - `WAIT_FOR_CLARITY`
 
-These prompt further review; they are not trade instructions. Discord receives one concise alert per completed report, and duplicate sends are prevented.
+These prompt further review; they are not trade instructions. A configured Discord
+webhook receives a concise alert for the latest deliverable event update. A newer
+material update may supersede an older unsent report. Known successful deliveries
+are not repeated; an unknown outcome permits one automatic resend after 15 minutes,
+which may duplicate the original alert. If that resend does not succeed, automatic
+attempts stop and the delivery remains visible for operator recovery (D-030).
+A blank webhook uses console delivery; it does not prove the Discord success criterion.
 
 ### History, replay, and operations
 
@@ -151,6 +159,13 @@ Preserve signals, events, reports, failures, notification attempts, and provenan
 - Classification, research, filings, and web sources can be incomplete, conflicting, or wrong.
 - The application lacks the portfolio, tax, valuation, liquidity, and thesis context required for personalized financial advice.
 - A single-process local application is an intentional MVP limit.
+- The synchronous loop can pause ingestion during bounded research or delivery;
+  REST recovery repairs recoverable minute gaps. This is not an always-current feed.
+- Regular-session handling uses a fixed 09:30–16:00 ET window and provider session
+  state, not a full exchange calendar. Holiday and early-close behavior must be
+  checked and documented during Milestone 8 before claiming broad session support.
+- The model-cost budget covers this app's estimates and reservations, including
+  hosted search, not an exact provider invoice or shared-account spending (D-031).
 
 ## Non-goals
 
@@ -168,10 +183,17 @@ The MVP is successful when:
 3. Fast, session-open gap, and daily deterministic rules detect understandable abrupt, overnight, and gradual market movement.
 4. News is filtered and classified without researching every article; significant good news and bad news can both qualify.
 5. Independent market and news signals route through one event manager and related signals become one evolving event.
-6. Each research-eligible event or material update produces one bounded research run.
+6. The latest research-eligible update produces one saved report through bounded
+   attempts when providers and budget permit. Failures may retry within limits;
+   deferred and superseded work is explicit rather than counted as success.
 7. The report follows its schema, cites evidence, and states uncertainty.
 8. Discord receives useful alerts for new or materially escalated events without routine duplicate delivery.
 9. Event, report, failure, and notification history survive restarts.
 10. Recorded scenarios replay through the live core flow.
 11. External services can change without rewriting core logic.
-12. API use stays within configured rate and cost limits.
+12. Model calls obey durable configured count limits and estimated-cost admission
+    checks; provider backoff/pacing is honored and estimation limits are stated.
+
+Milestone 8 maps these criteria to repeatable scenarios and separate live evidence
+in [spec 011](../specs/011-full-loop-hardening/SPEC.md). Missing live evidence leaves
+the MVP verification gate open even when feature tests pass.

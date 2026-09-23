@@ -12,11 +12,13 @@ flowchart TD
     N["News inputs"] --> NN["Normalize"]
 
     NM --> C["Fast detector"]
+    NM --> G0["Session-open gap"]
     NM --> D["Daily trend detector"]
     NN --> F1["Deterministic news filters"]
     F1 --> CLF["Cheap structured classifier"]
 
     C --> E["Normalized signals"]
+    G0 --> E
     D --> E
     CLF -->|"significant, any direction"| E
     CLF -->|"rejected / not significant"| X["Stop<br/>no event, no research"]
@@ -80,7 +82,7 @@ There is no separate weekly pipeline. Exact thresholds, severity boundaries, and
 
 The event manager consumes all qualifying signals and alone owns correlation, promotion, deduplication, cooldowns, lifecycle state, retry eligibility, and research eligibility. A market or significant news signal may create an event by itself; later related signals enrich it. A new event or a material update **needs work** (research, then notify). An exact repeat is ignored. A same- or lower-importance update without a new horizon or new significant news is saved and does not requeue research.
 
-Sustained directional movement is one evolving **open** episode. Same-severity repeats are retained without repeated work. A worse severity, a newly crossed horizon, or significant new news may update and requeue the episode. When market detector stress for that ticker and direction has fully rearmed/cleared, the episode closes so a later unrelated breach starts a new event rather than reopening finished history. Rejected inputs create no event or cooldown; notification cooldown begins only after successful delivery.
+Sustained directional movement is one evolving **open** episode. Same-severity repeats are retained without repeated work. A worse severity, a newly crossed horizon, or significant new news may update and requeue the episode. When market detector stress for that ticker and direction has fully rearmed/cleared, the episode closes so a later unrelated breach starts a new event rather than reopening finished history. Rejected inputs create no event or successful-notification history. Only successful delivery establishes notification time; there is no separate elapsed-time suppression rule in the MVP (D-032).
 
 ### Research
 
@@ -90,12 +92,15 @@ Research receives a prepared evidence packet only after an event needs work. The
 
 SQLite stores the state needed for recovery, history, replay, and idempotency:
 
-- Configuration and watchlist data.
+- Provider/feed and watchlist provenance on retained records. Runtime settings
+  currently load from environment / `.env`; there is no persisted portfolio or
+  user-configuration service.
 - Normalized daily history, regular-session minute history, and detector baselines.
 - Signals, articles, and classifications.
 - Event lifecycle and retry state.
 - Reports, source metadata, and provenance.
 - Notification attempts and failures.
+- Delivery claims/receipts and model-cost reservations when Milestone 7 lands.
 
 Writes pass through one controlled application boundary.
 For market ingestion, one completed-bar transaction owns the bar write, detector
@@ -104,7 +109,21 @@ suppress a signal that was never durably accepted.
 
 ### Output
 
-Validate and persist a report before delivery. Discord is the first live notification adapter. Retries are allowed, but the same report must not be sent twice.
+Validate and persist a report before delivery. Current output is console-only;
+Milestone 7 adds a Discord webhook adapter. Claim before sending, persist the
+receipt before completing the update, and never resend known success. Unknown
+outcomes permit one automatic resend after a durable 15-minute wait, subject to
+provider waits and current-update/destination checks. Consume that allowance before
+I/O and never reset it on restart. If the resend cannot complete, hold for explicit
+operator resolution. A resend can duplicate a message; a local transaction cannot
+guarantee exactly-once delivery to Discord (D-030). Retain receipts even if a
+newer update makes the old event-state write invalid. Destination changes do not
+replay completed updates. Console logging has no transactional delivery guarantee.
+
+Model-use admission remains deterministic at storage/scheduling boundaries.
+Milestone 7 reserves call counts and estimated spend before I/O, settles observed
+usage separately from report validation, and keeps conservative charges for
+unknown outcomes (D-031). This does not change event promotion or news significance.
 
 ## Core data
 
@@ -140,7 +159,12 @@ stateDiagram-v2
     Notified --> Queued: Newer material update
 ```
 
-Lifecycle state survives restarts. Interrupted research resumes research, while a saved report or retryable delivery failure resumes notification without repeating research. Routine same-severity updates do not reopen completed work; escalation, a new horizon, or significant news requeues the event immediately.
+Lifecycle state survives restarts. Interrupted research resumes subject to attempt
+and budget limits. Saved reports resume notification without repeating research;
+Milestone 7 distinguishes waiting retries, durable receipts, permanent failures,
+and unknown outcomes underneath this event lifecycle. Routine same-severity
+updates do not reopen work; escalation, a new horizon, or significant news requeues
+the event immediately. No separate cooldown timer is required (D-032).
 
 ## Reliability and security
 
@@ -171,4 +195,10 @@ Lifecycle state survives restarts. Interrupted research resumes research, while 
 - [Live news and classification](../specs/008-live-news-classification/SPEC.md) added bounded Alpaca REST news polling, deterministic filters and budgets, and a small structured classifier on the news path only. Significant good, bad, or unclear news can create or enrich an event through the existing event manager.
 - [Research and reporting](../specs/009-research-and-reporting/SPEC.md) runs one bounded research attempt per live pass after the event manager marks an update as needing work, recovers regular-minute gaps afterward, and prints a cited console report. Discord remains Milestone 7.
 
-That path does not make news a gate for market events or market movement a gate for significant news. Discord remains a later milestone. Offline fixtures still use the negative-phrase demo.
+- [Discord and operations](../specs/010-discord-and-operations/SPEC.md) is drafted
+  for Milestone 7; implementation has not started.
+- [Full-loop hardening](../specs/011-full-loop-hardening/SPEC.md) defines the
+  Milestone 8 replay and live-verification gate; execution has not started.
+
+That path does not make news a gate for market events or market movement a gate
+for significant news. Offline fixtures still use the negative-phrase demo.
