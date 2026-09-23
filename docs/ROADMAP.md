@@ -4,19 +4,14 @@
 
 ## Current focus
 
-**Milestone 6 — Research and reporting** is complete under
-[spec 009](../specs/009-research-and-reporting/SPEC.md). Deterministic tests
-cover bounded local evidence, SEC and OpenAI adapters, the research runner,
-one live research attempt per pass, post-research minute recovery, and console
-reports for news-only, combined, and broad-market cases. No live provider smoke
-was run. The next milestone is **Milestone 7 — Discord and operations**, which
-has not started.
+Milestones 0–6 are implemented: the local app monitors markets and news, retains
+event history, and produces research reports on the console. **Milestone 7 —
+Discord and operations** is next; its spec is drafted and implementation has not
+started. **Milestone 8 — Full-loop hardening** then verifies the complete local MVP.
 
-The live market loop (Milestones 4, [006](../specs/006-live-session-hardening/SPEC.md),
-and [007](../specs/007-regular-session-lifecycle/SPEC.md)), opt-in heartbeat / watch
-log ([spec 005](../specs/005-ops-visibility/SPEC.md)), and REST news classification
-are in. Spec 007 finished regular-session isolation, socket lifecycle, daily
-catch-up, and the startup REST-to-stream handoff before news classification.
+Completed milestones record implementation and acceptance checks. Live verification
+is noted separately; the full loop still needs Milestone 8's validation. Each linked
+spec owns detailed behavior, with its plan and tasks tracking implementation.
 
 ## Milestones
 
@@ -159,20 +154,35 @@ change was added. Automated checks use fakes only; no live smoke was run.
 
 ### Milestone 7 — Discord and operations
 
-**Status:** Not started
+**Status:** Not started; spec drafted
 
-Add idempotent Discord delivery, bounded retries, operational status, and API rate and cost enforcement. Notification cooldown begins only after successful delivery and does not block material escalation.
+**Spec:** [`specs/010-discord-and-operations/`](../specs/010-discord-and-operations/SPEC.md)
 
-**Complete when:** completed reports produce the intended Discord alerts, routine repeats stay quiet, and failures remain visible and recoverable.
+Deliver saved reports to Discord with controlled retries and recoverable failures.
+Make operational health visible and model use subject to configurable call and
+estimated-cost limits. Preserve quiet routine repeats and timely material updates.
+
+**Complete when:** saved reports produce the intended alerts, delivery failures
+remain visible and recoverable, and usage controls hold across restarts. Acceptance
+checks pass; integrated live verification follows in Milestone 8.
 
 ### Milestone 8 — Full-loop hardening
 
-**Status:** Not started
+**Status:** Not started; spec drafted
 
-Replay representative market, news, restart, provider-failure, research-failure, and delivery-failure scenarios through the same boundaries used by live operation. Tune rules only from observed behavior.
+**Spec:** [`specs/011-full-loop-hardening/`](../specs/011-full-loop-hardening/SPEC.md)
 
-**Complete when:** the local MVP meets the [product success criteria](PRODUCT.md#mvp-success-criteria) with documented limitations.
+After Milestone 7, verify the complete monitoring → event → research → notification
+loop through representative replay and bounded live checks. Fix observed reliability
+gaps and assess report usefulness. Tune rules only from observed behavior.
 
-After the MVP, a news websocket, configurable scan cadences, additional horizons,
-deployment, interfaces, valuation tools, or provider failover require demonstrated
-need and a new roadmap decision.
+**Complete when:** replay and live evidence demonstrate the
+[product success criteria](PRODUCT.md#mvp-success-criteria), with usable operating
+and recovery guidance and documented limitations. This completes the local MVP.
+
+## After the MVP
+
+A news websocket, configurable rules or scan cadences, additional horizons,
+portfolio context, deployment, interfaces, valuation tools, and provider failover
+require demonstrated need and a new roadmap decision. Deferred scope and current limitations live in
+[Product](PRODUCT.md#constraints-and-limitations) and [Decisions](DECISIONS.md#deferred).
