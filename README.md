@@ -1,8 +1,8 @@
 # AI Investment Assistant
 
-A local market-monitoring and research assistant. It watches a small list of US stocks, notices meaningful price moves or news, investigates selected situations, and sends one focused report for review.
+A local market monitoring and research assistant. It watches a small list of US stocks, notices meaningful price moves or news, investigates selected situations, and sends a focused report to the user for review.
 
-It does not trade, promise certainty, or make investment decisions for you.
+> It does not trade, promise certainty, or make investment decisions for you.
 
 ## How it works
 
@@ -31,31 +31,16 @@ uv run ai-investment-assistant
 
 Edit `.env` before a live run. Never commit `.env`.
 
-| Variable | Needed for | If blank |
-| --- | --- | --- |
-| `INVESTMENT_ASSISTANT_ALPACA_API_KEY_ID` and `INVESTMENT_ASSISTANT_ALPACA_API_SECRET_KEY` | Live market history, the stock socket, and Alpaca news retrieval | Offline fixture demo only |
-| `INVESTMENT_ASSISTANT_OPENAI_API_KEY` | Live news classification and live research | News is still fetched and saved, but every candidate is deferred and no news signal is created. Queued research stays retryable and no report is written |
-| `INVESTMENT_ASSISTANT_SEC_USER_AGENT` | Optional contact string for SEC EDGAR during research | Filing tools return unavailable. Research can still use the local packet and web search |
-| `INVESTMENT_ASSISTANT_WATCHLIST` | Which names to watch (required in live mode) | Live start is rejected |
+| Variable                                                                                  | Needed for                                     | If blank                                                                         |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------- |
+| `INVESTMENT_ASSISTANT_ALPACA_API_KEY_ID` and `INVESTMENT_ASSISTANT_ALPACA_API_SECRET_KEY` | Live prices, the stock socket, and Alpaca news | Offline fixture demo                                                             |
+| `INVESTMENT_ASSISTANT_OPENAI_API_KEY`                                                     | Live news classification and research          | Articles are saved. No news signal and no report; research waits for a real run. |
+| `INVESTMENT_ASSISTANT_SEC_USER_AGENT`                                                     | Optional SEC contact string during research    | Filing lookups stay off. Local and web research still run.                       |
+| `INVESTMENT_ASSISTANT_WATCHLIST`                                                          | Symbols to watch in live mode                  | Live start is rejected                                                           |
 
-Create an OpenAI key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) and paste it into `INVESTMENT_ASSISTANT_OPENAI_API_KEY`. Do that before a live news or research check. Without it the app will not classify articles or write a research report. It will not substitute a fake report.
-
-`INVESTMENT_ASSISTANT_SEC_USER_AGENT` is optional. When set, use a short contact string such as `Your Name you@example.com`. Leave it blank and filing lookups stay unavailable; the rest of research still runs. The finished report is printed to the console. Discord delivery is a later milestone.
-
-Alpaca keys come from your Alpaca account. Default feed is IEX.
-
-Default logs are quiet JSON at `INFO`. Two optional switches do not change that default:
-
-```bash
-# Still JSON INFO, plus a periodic “still watching” line (useful on weekends)
-INVESTMENT_ASSISTANT_HEARTBEAT=true
-
-# Separate human-readable story of the run (backfill, socket, minutes, daily, events)
-INVESTMENT_ASSISTANT_WATCH_LOG=true
-
-# Easier-to-read standard logs (does not turn heartbeat or watch log on)
-INVESTMENT_ASSISTANT_LOG_JSON=false
-```
+- Alpaca keys come from your Alpaca account. The default feed is `iex`.
+- Create an OpenAI key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+- For the SEC value, use a short contact string such as `Your Name you@example.com`.
 
 ## Checks
 
