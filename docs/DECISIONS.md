@@ -280,8 +280,8 @@ already completed updates. Console logging itself is not transactional with SQLi
 
 **Why:** This replaces the absolute duplicate-prevention wording in Product and
 Architecture with a recoverable, testable guarantee. Detailed states, retry rules,
-and recovery commands belong to spec 010. This is planned behavior, not a claim
-that the current console notifier already implements it.
+and recovery commands belong to spec 010. Tasks 2–7 implement the delivery and
+console ordering described here; Milestone 7 acceptance remains open.
 
 ### D-031 — Reserve model use before I/O and label estimated cost honestly
 

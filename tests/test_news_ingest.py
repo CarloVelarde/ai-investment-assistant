@@ -1,10 +1,17 @@
 """Tests for news promotion, rejection, and restart-safe identity."""
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from investment_assistant.clock import FixedClock
 from investment_assistant.event_manager import EventManager
+from investment_assistant.model_budget import (
+    CLASSIFIER_MODEL as PRICED_CLASSIFIER_MODEL,
+)
+from investment_assistant.model_budget import (
+    token_charge,
+)
 from investment_assistant.models import (
     ClassificationStatus,
     EventStatus,
@@ -142,6 +149,49 @@ def test_positive_negative_and_unclear_news_each_create_one_event(
     assert None in directions
     assert all(event.status is EventStatus.QUEUED for event in events)
     assert all(event.category is not None for event in events)
+
+
+def test_classifier_count_precedes_call_and_failed_output_still_charges(
+    tmp_path: Path,
+) -> None:
+    article = _article("usage")
+    path = tmp_path / "classified-budget.db"
+    with SQLiteStorage(path) as storage:
+        storage.initialize()
+        manager = EventManager(storage, clock=FixedClock(NOW))
+
+        class TrackingClassifier(FakeNewsClassifier):
+            last_usage: tuple[int, int] | None = (100, 10)
+
+            def classify(self, current: NewsArticle, ticker: str) -> NewsClassification:
+                assert storage.classifier_call_count(NOW.date().isoformat()) == 1
+                return replace(
+                    _classified(current, ticker, direction=NewsDirection.UP),
+                    status=ClassificationStatus.FAILED,
+                    relevant=None,
+                    significant=None,
+                    direction=None,
+                    category=None,
+                    importance=None,
+                    confidence=None,
+                    rationale=None,
+                    safe_error="invalid model output",
+                )
+
+        result = poll_and_classify_news(
+            storage=storage,
+            manager=manager,
+            provider=FakeNewsProvider((NewsPage(articles=(article,)),)),
+            classifier=TrackingClassifier(),
+            watchlist=("TSLA",),
+            clock=FixedClock(NOW),
+            calls_per_day=1,
+            budget_microdollars=2_000_000,
+        )
+        assert result.classifier_calls == 1
+        assert storage.model_budget_used(NOW.date().isoformat()) == token_charge(
+            PRICED_CLASSIFIER_MODEL, 100, 10
+        )
 
 
 def test_insignificant_and_irrelevant_results_create_no_event(tmp_path: Path) -> None:

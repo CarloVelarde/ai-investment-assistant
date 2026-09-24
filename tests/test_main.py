@@ -12,13 +12,24 @@ from pydantic import SecretStr
 from investment_assistant.alpaca import AlpacaMarketData, HistoryHttpResponse
 from investment_assistant.clock import SteppingClock
 from investment_assistant.config import Settings
+from investment_assistant.discord_notify import DeliveryOutcome, SendResult
 from investment_assistant.main import build_live_provider, main
 from investment_assistant.market_data import (
     FakeMarketData,
     MarketSession,
     StreamMinute,
 )
-from investment_assistant.models import MarketBar, MarketTimeframe
+from investment_assistant.models import (
+    Event,
+    EventStatus,
+    MarketBar,
+    MarketTimeframe,
+    MarketWindow,
+    ResearchReport,
+    SignalDirection,
+    SignalImportance,
+)
+from investment_assistant.reporting import create_fake_research_report
 from investment_assistant.stock_stream import (
     STOCK_STREAM_PREFIX,
     FakeStockStreamTransport,
@@ -62,6 +73,57 @@ def _daily() -> MarketBar:
         feed="iex",
         retrieved_at=CLOSED_AT,
     )
+
+
+def test_live_session_delivers_saved_report_through_webhook_sender(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "discord-live.db"
+    event = Event(
+        event_id="event:existing-report",
+        ticker="TSLA",
+        direction=SignalDirection.UP,
+        category=None,
+        importance=SignalImportance.MODERATE,
+        market_windows=(MarketWindow.ONE_HOUR,),
+        current_update=1,
+        status=EventStatus.REPORTED,
+        created_at=CLOSED_AT,
+        updated_at=CLOSED_AT,
+    )
+    with SQLiteStorage(database) as storage:
+        storage.initialize()
+        storage.save_event(event)
+        storage.save_report(create_fake_research_report(event, ()))
+    settings = Settings(
+        alpaca_api_key_id="test-key-id",
+        alpaca_api_secret_key=SecretStr(SECRET),
+        discord_webhook_url=SecretStr(
+            "https://discord.com/api/webhooks/12345/test-token"
+        ),
+        watchlist="TSLA",
+        database_path=database,
+    )
+    calls: list[str] = []
+
+    def send(_: Event, __: ResearchReport, identity: str) -> SendResult:
+        calls.append(identity)
+        return SendResult(DeliveryOutcome.ACKNOWLEDGED, message_id="123456")
+
+    main(
+        settings=settings,
+        provider=FakeMarketData(history=(), session=CLOSED_SESSION),
+        clock=SteppingClock(CLOSED_AT),
+        loop=False,
+        sleeper=lambda _: None,
+        researcher=lambda *_: pytest.fail("saved report repeated research"),
+        discord_sender=send,
+    )
+    with SQLiteStorage(database) as storage:
+        storage.initialize()
+        current = storage.get_event(event.event_id)
+        assert current is not None and current.status is EventStatus.NOTIFIED
+    assert len(calls) == 1
 
 
 def test_main_stays_on_the_offline_fixture_path_without_keys(

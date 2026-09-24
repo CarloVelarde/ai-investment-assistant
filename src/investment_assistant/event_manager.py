@@ -1,7 +1,9 @@
 """Deterministic grouping, promotion, and processing of qualifying signals."""
 
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 
 from investment_assistant.clock import Clock
 from investment_assistant.models import (
@@ -18,8 +20,12 @@ from investment_assistant.models import (
     SignalDirection,
     SignalImportance,
 )
+from investment_assistant.reporting import emit_console_notification
 from investment_assistant.research import ResearchDeferred
 from investment_assistant.storage import SQLiteStorage
+
+if TYPE_CHECKING:
+    from investment_assistant.delivery import DeliveryManager
 
 type DurableResearcher = Callable[[Event, tuple[Signal, ...]], ResearchReport]
 type DurableNotifier = Callable[[Event, ResearchReport], None]
@@ -36,9 +42,17 @@ class SignalHandlingResult:
 class EventManager:
     """Own signal grouping and research eligibility decisions."""
 
-    def __init__(self, storage: SQLiteStorage, *, clock: Clock) -> None:
+    def __init__(
+        self,
+        storage: SQLiteStorage,
+        *,
+        clock: Clock,
+        delivery_manager: DeliveryManager | None = None,
+    ) -> None:
         self._storage = storage
         self._clock = clock
+        self._delivery_manager = delivery_manager
+        self.last_delivery_attempted = False
 
     def handle_signal(self, signal: Signal) -> SignalHandlingResult:
         """Accept a signal once and group it into one durable event."""
@@ -66,16 +80,23 @@ class EventManager:
         """Process saved reports, then pending research from durable state.
 
         Offline callers omit ``max_research_runs`` and drain each event once.
-        Live mode delivers every ready notification first, then starts at most
-        one fair research run.
+        Live mode attempts one due delivery first, then starts at most one
+        fair research run.
         """
 
         results: list[Event] = []
+        self.last_delivery_attempted = False
+        if self._delivery_manager is not None:
+            self.last_delivery_attempted = self._delivery_manager.process_one()
         for event in self._storage.list_events():
             if event.status is EventStatus.NOTIFIED:
                 continue
             if self._notification_ready(event):
-                result = self._notify(event, notifier)
+                result = (
+                    None
+                    if self._delivery_manager is not None
+                    else self._notify(event, notifier)
+                )
                 if result is not None:
                     results.append(result)
                 continue
@@ -111,6 +132,9 @@ class EventManager:
         if event is None or event.status is EventStatus.NOTIFIED:
             return event
         if self._notification_ready(event):
+            if self._delivery_manager is not None:
+                self.last_delivery_attempted = self._delivery_manager.process_one()
+                return self._storage.get_event(event_id)
             return self._notify(event, notifier)
         if event.status is EventStatus.FAILED:
             failure = self._storage.get_latest_failure(
@@ -246,6 +270,8 @@ class EventManager:
         reported = self._storage.get_event(started.event_id)
         if reported is None:
             return None
+        if self._delivery_manager is not None:
+            return reported
         return self._notify(reported, notifier)
 
     def _notify(
@@ -253,6 +279,8 @@ class EventManager:
         event: Event,
         notifier: DurableNotifier,
     ) -> Event | None:
+        if self._storage.has_external_delivery(event.event_id, event.current_update):
+            return None
         # Re-check the saved event before any user-facing side effect so an
         # outdated report is not sent after a newer important update.
         deliverable = self._deliverable_notification(event)
@@ -267,6 +295,20 @@ class EventManager:
         attempt_id = (
             f"attempt:{current.event_id}:{current.current_update}:{attempt_number}"
         )
+        if notifier is emit_console_notification:
+            attempt = NotificationAttempt(
+                attempt_id=attempt_id,
+                event_id=current.event_id,
+                event_update=current.current_update,
+                attempted_at=attempted_at,
+                succeeded=True,
+            )
+            if self._storage.save_notification_result(
+                attempt, failure=None, updated_at=self._clock.now()
+            ):
+                with suppress(Exception):
+                    notifier(current, report)
+            return self._storage.get_event(current.event_id)
         try:
             notifier(current, report)
         except Exception as error:

@@ -141,6 +141,7 @@ def test_adapter_sets_store_false_no_tools_and_pinned_model() -> None:
     payload = http.payloads[0]
     assert payload["model"] == CLASSIFIER_MODEL
     assert payload["store"] is False
+    assert payload["max_output_tokens"] == 2000
     assert "tools" not in payload
     assert result.model_version == CLASSIFIER_MODEL
     assert result.prompt_version == CLASSIFIER_PROMPT_VERSION

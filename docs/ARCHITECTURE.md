@@ -100,7 +100,7 @@ SQLite stores the state needed for recovery, history, replay, and idempotency:
 - Event lifecycle and retry state.
 - Reports, source metadata, and provenance.
 - Notification attempts and failures.
-- Delivery claims/receipts and model-cost reservations when Milestone 7 lands.
+- Delivery claims/receipts, operator retry authorization, and model-cost reservations.
 
 Writes pass through one controlled application boundary.
 For market ingestion, one completed-bar transaction owns the bar write, detector
@@ -109,9 +109,11 @@ suppress a signal that was never durably accepted.
 
 ### Output
 
-Validate and persist a report before delivery. Current output is console-only;
-Milestone 7 adds a Discord webhook adapter. Claim before sending, persist the
-receipt before completing the update, and never resend known success. Unknown
+Validate and persist a report before delivery. Console remains available when the
+webhook is blank. Milestone 7 now has a Discord webhook adapter and durable delivery
+state, local recovery commands, and shared estimated-cost admission. Claim before
+sending, persist the receipt before completing the update, and never resend known
+success. Unknown
 outcomes permit one automatic resend after a durable 15-minute wait, subject to
 provider waits and current-update/destination checks. Consume that allowance before
 I/O and never reset it on restart. If the resend cannot complete, hold for explicit
@@ -193,10 +195,11 @@ the event immediately. No separate cooldown timer is required (D-032).
 - [Live session hardening](../specs/006-live-session-hardening/SPEC.md) completed the current live market loop: after-close daily rules run only on finished days, and `session_gap` compares the last regular close with today’s regular open once per symbol per session.
 - [Regular session lifecycle correction](../specs/007-regular-session-lifecycle/SPEC.md) completed the pre-Milestone-5 correction: isolate regular minutes, gate the socket by session state, close the startup history/stream handoff, and recover the latest missed daily scan.
 - [Live news and classification](../specs/008-live-news-classification/SPEC.md) added bounded Alpaca REST news polling, deterministic filters and budgets, and a small structured classifier on the news path only. Significant good, bad, or unclear news can create or enrich an event through the existing event manager.
-- [Research and reporting](../specs/009-research-and-reporting/SPEC.md) runs one bounded research attempt per live pass after the event manager marks an update as needing work, recovers regular-minute gaps afterward, and prints a cited console report. Discord remains Milestone 7.
+- [Research and reporting](../specs/009-research-and-reporting/SPEC.md) runs one bounded research attempt per live pass after the event manager marks an update as needing work and recovers regular-minute gaps afterward. It saves a cited report for delivery.
 
-- [Discord and operations](../specs/010-discord-and-operations/SPEC.md) is drafted
-  for Milestone 7; implementation has not started.
+- [Discord and operations](../specs/010-discord-and-operations/SPEC.md) has durable
+  delivery, local recovery commands, and model-use admission. Scheduling and
+  expanded operational status remain open in Milestone 7.
 - [Full-loop hardening](../specs/011-full-loop-hardening/SPEC.md) defines the
   Milestone 8 replay and live-verification gate; execution has not started.
 

@@ -34,13 +34,15 @@ def test_source_tree_has_no_worker_orm_or_weekly_scheduler() -> None:
         assert token not in text
 
 
-def test_live_mode_adds_news_rest_without_websocket_discord_or_weekly_job() -> None:
+def test_live_mode_adds_news_rest_and_webhook_without_bot_or_weekly_job() -> None:
     text = "\n".join(path.read_text(encoding="utf-8") for path in SOURCE.rglob("*.py"))
 
     assert "/v1beta1/news" in text
     assert "wss://stream.data.alpaca.markets/v1beta1/news" not in text
     assert "wss://stream.data.alpaca.markets/v2/" in text
-    assert "discord" not in text.lower()
+    assert "class DiscordNotifier" in text
+    assert "discord.py" not in text.lower()
+    assert "discord.ext" not in text.lower()
     assert "weekly" not in text.lower()
     assert "brokerage" not in text.lower()
     assert "place_order" not in text

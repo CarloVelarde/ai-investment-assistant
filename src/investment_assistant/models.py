@@ -789,7 +789,14 @@ class ResearchAttempt(ResearchValue):
 class ResearchDeferral(ResearchValue):
     event_id: ResearchID
     event_update: Annotated[int, Field(ge=1, strict=True)]
-    reason: Literal["MISSING_KEY", "DAILY_BUDGET"]
+    reason: Literal[
+        "MISSING_KEY",
+        "DAILY_BUDGET",
+        "MODEL_BUDGET",
+        "UNKNOWN_PRICING",
+        "MIGRATION_HOLD",
+        "ESTIMATION_OVERRUN",
+    ]
     deferred_at: AwareDatetime
     retry_not_before: AwareDatetime | None
 

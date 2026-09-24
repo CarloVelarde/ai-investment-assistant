@@ -12,6 +12,7 @@ import pytest
 
 from investment_assistant.clock import FixedClock
 from investment_assistant.event_manager import EventManager
+from investment_assistant.model_budget import RESEARCH_MODEL, token_charge
 from investment_assistant.models import (
     Event,
     EventStatus,
@@ -44,6 +45,7 @@ def runner(
     sec_http: ScriptedHttp | None = None,
     *,
     key: bool = True,
+    budget_microdollars: int | None = None,
 ) -> ResearchRunner:
     sec_http = sec_http or ScriptedHttp([])
     model = (
@@ -57,7 +59,12 @@ def runner(
         sec_http, timer, "Test test@example.test" if sec_http.responses else ""
     )
     return ResearchRunner(
-        storage=storage, model=model, sec=sec, clock=FixedClock(NOW), monotonic=timer
+        storage=storage,
+        model=model,
+        sec=sec,
+        clock=FixedClock(NOW),
+        monotonic=timer,
+        budget_microdollars=budget_microdollars,
     )
 
 
@@ -131,6 +138,33 @@ def test_packet_only_report_through_event_manager_and_restart(tmp_path: Path) ->
             notifier=lambda *args: pytest.fail("duplicate"),
         )
     assert len(http.calls) == 1
+
+
+def test_invalid_model_output_keeps_independent_usage_charge(tmp_path: Path) -> None:
+    timer = Timer()
+    http = ScriptedHttp(
+        [
+            response(
+                completed(
+                    message("not valid report JSON"),
+                    usage={
+                        "input_tokens": 123,
+                        "output_tokens": 45,
+                    },
+                )
+            )
+        ]
+    )
+    with SQLiteStorage(tmp_path / "invalid-budget.db") as storage:
+        seed(storage)
+        live = runner(storage, timer, http, budget_microdollars=2_000_000)
+        with pytest.raises(ResearchError):
+            live(EVENT, (SIGNAL,))
+        assert len(http.calls) == 1
+        assert storage.research_starts_on(NOW) == 1
+        assert storage.model_budget_used(NOW.date().isoformat()) == token_charge(
+            RESEARCH_MODEL, 123, 45
+        )
 
 
 def test_filings_excerpt_finalization_and_normalized_snapshots(tmp_path: Path) -> None:
@@ -470,13 +504,30 @@ def test_stale_update_is_rejected_before_returning_report(tmp_path: Path) -> Non
                     timeout=timeout,
                 )
 
-        http = UpdatingHttp([response(completed(message()))])
+        http = UpdatingHttp(
+            [
+                response(
+                    completed(
+                        message(),
+                        usage={
+                            "input_tokens": 80,
+                            "output_tokens": 40,
+                        },
+                    )
+                )
+            ]
+        )
         with pytest.raises(ResearchError):
-            runner(storage, Timer(), http)(EVENT, (SIGNAL,))
+            runner(storage, Timer(), http, budget_microdollars=2_000_000)(
+                EVENT, (SIGNAL,)
+            )
         queued = storage.get_event(EVENT.event_id)
         assert queued is not None
         assert queued.status == EventStatus.QUEUED
         assert not storage.list_reports(EVENT.event_id)
+        assert storage.model_budget_used(NOW.date().isoformat()) == token_charge(
+            RESEARCH_MODEL, 80, 40
+        )
 
 
 @pytest.mark.parametrize("combined", [False, True])

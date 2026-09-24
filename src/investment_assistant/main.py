@@ -13,6 +13,8 @@ from investment_assistant.alpaca import (
 )
 from investment_assistant.clock import Clock, SteppingClock, SystemClock
 from investment_assistant.config import Settings, get_settings
+from investment_assistant.delivery import DatabaseOwner, DeliveryManager, Sender
+from investment_assistant.discord_notify import DiscordNotifier
 from investment_assistant.event_manager import EventManager
 from investment_assistant.live_ingest import (
     LiveIngestResult,
@@ -80,6 +82,7 @@ def main(
     sleeper: Callable[[float], None] | None = None,
     researcher: Researcher | None = None,
     notifier: Notifier = emit_console_notification,
+    discord_sender: Sender | None = None,
 ) -> LiveIngestResult | None:
     """Start the application.
 
@@ -135,6 +138,7 @@ def main(
             sleeper=poll,
             researcher=researcher,
             notifier=notifier,
+            discord_sender=discord_sender,
             news_provider=live_news,
             classifier=live_classifier,
         )
@@ -171,6 +175,7 @@ def run_live_session(
     sleeper: Callable[[float], None],
     researcher: Researcher | None,
     notifier: Notifier,
+    discord_sender: Sender | None = None,
     max_cycles: int | None = None,
     news_provider: NewsProvider | None = None,
     classifier: NewsClassifier | None = None,
@@ -185,9 +190,21 @@ def run_live_session(
     last_heartbeat_at: datetime | None = None
     last_news_poll_at: datetime | None = None
     cycles = 0
-    with SQLiteStorage(settings.database_path) as storage:
-        storage.initialize()
-        manager = EventManager(storage, clock=clock)
+    with (
+        DatabaseOwner(settings.database_path),
+        SQLiteStorage(settings.database_path) as storage,
+    ):
+        storage.initialize(now=clock.now())
+        webhook_url = settings.discord_webhook_url.get_secret_value()
+        delivery_manager = None
+        if webhook_url and notifier is emit_console_notification:
+            delivery_manager = DeliveryManager(
+                storage,
+                clock=clock,
+                webhook_url=webhook_url,
+                sender=discord_sender or DiscordNotifier(webhook_url).send,
+            )
+        manager = EventManager(storage, clock=clock, delivery_manager=delivery_manager)
         live_researcher = researcher or build_live_researcher(storage, settings, clock)
         latest = backfill_and_replay(
             storage=storage,
@@ -211,6 +228,7 @@ def run_live_session(
             clock=clock,
             last_news_poll_at=last_news_poll_at,
             force=True,
+            settings=settings,
         )
         latest, stream_connected = _process_pending_and_recover(
             manager,
@@ -349,6 +367,7 @@ def run_live_session(
                 watchlist=news_symbols,
                 clock=clock,
                 last_news_poll_at=last_news_poll_at,
+                settings=settings,
             )
             latest, stream_connected = _process_pending_and_recover(
                 manager,
@@ -409,6 +428,8 @@ def build_live_researcher(
         model=model,
         sec=SecClient(http=http, clock=clock, user_agent=settings.sec_user_agent),
         clock=clock,
+        daily_starts=settings.research_starts_per_day,
+        budget_microdollars=settings.model_budget_microdollars,
     )
 
 
@@ -501,6 +522,7 @@ def _poll_news_if_due(
     clock: Clock,
     last_news_poll_at: datetime | None,
     force: bool = False,
+    settings: Settings | None = None,
 ) -> datetime | None:
     if news_provider is None:
         return last_news_poll_at
@@ -519,6 +541,11 @@ def _poll_news_if_due(
             classifier=classifier,
             watchlist=watchlist,
             clock=clock,
+            calls_per_day=settings.classifier_calls_per_day if settings else 100,
+            calls_per_pass=settings.classifier_calls_per_pass if settings else 20,
+            budget_microdollars=settings.model_budget_microdollars
+            if settings
+            else None,
         )
     except Exception as error:
         logger.warning(
@@ -557,7 +584,7 @@ def _process_pending_events(
             events=len(processed),
             tickers=",".join(event.ticker for event in processed),
         )
-    return attempted
+    return attempted or manager.last_delivery_attempted
 
 
 def _process_pending_and_recover(

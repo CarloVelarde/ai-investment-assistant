@@ -8,6 +8,12 @@ from typing import Protocol
 from urllib.parse import urlsplit, urlunsplit
 
 from investment_assistant.clock import Clock
+from investment_assistant.model_budget import (
+    RESEARCH_MODEL as RESEARCH_MODEL,
+)
+from investment_assistant.model_budget import (
+    extract_usage,
+)
 from investment_assistant.models import EvidenceSnapshot, EvidenceSource, ReportDraft
 from investment_assistant.research_http import (
     MAX_RESPONSE_BYTES,
@@ -16,7 +22,6 @@ from investment_assistant.research_http import (
     ResearchHttp,
 )
 
-RESEARCH_MODEL = "gpt-5.4-mini-2026-03-17"
 RESEARCH_PROMPT_VERSION = "research-v1"
 RESEARCH_SCHEMA_VERSION = 1
 RESEARCH_PROMPT = """Investigate only the supplied event for human review. Use the
@@ -105,6 +110,8 @@ class OpenAIResearchModel:
         self._http = http
         self._clock = clock
         self._api_key = api_key.strip()
+        self.last_usage: tuple[int, int] | None = None
+        self.last_search_calls: int | None = None
 
     @property
     def configured(self) -> bool:
@@ -118,6 +125,8 @@ class OpenAIResearchModel:
         tools_enabled: bool,
         deadline: Deadline,
     ) -> ModelTurn:
+        self.last_usage = None
+        self.last_search_calls = None
         try:
             if not self._api_key.strip():
                 raise ResearchError("Research API key unavailable.")
@@ -147,9 +156,16 @@ class OpenAIResearchModel:
                 or len(response.body) > MAX_RESPONSE_BYTES
             ):
                 raise ResearchError("Research model response unavailable or oversized.")
-            turn = self._parse(
-                json.loads(response.body), search_cap if tools_enabled else 0
-            )
+            body = json.loads(response.body)
+            if isinstance(body, dict):
+                self.last_usage = extract_usage(body)
+                output = body.get("output")
+                if isinstance(output, list):
+                    self.last_search_calls = sum(
+                        isinstance(item, dict) and item.get("type") == "web_search_call"
+                        for item in output
+                    )
+            turn = self._parse(body, search_cap if tools_enabled else 0)
             deadline.remaining()
             return turn
         except ResearchError:

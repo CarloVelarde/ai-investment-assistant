@@ -5,9 +5,10 @@
 ## Current focus
 
 Milestones 0–6 are implemented: the local app monitors markets and news, retains
-event history, and produces research reports on the console. **Milestone 7 —
-Discord and operations** is next; its spec is drafted and implementation has not
-started. **Milestone 8 — Full-loop hardening** then verifies the complete local MVP.
+event history, and produces research reports. **Milestone 7 — Discord and
+operations** is in progress: durable delivery and the webhook adapter are being
+implemented; operator recovery, model-cost controls, and expanded operations
+remain. **Milestone 8 — Full-loop hardening** then verifies the complete local MVP.
 
 Completed milestones record implementation and acceptance checks. Live verification
 is noted separately; the full loop still needs Milestone 8's validation. Each linked
@@ -154,7 +155,7 @@ change was added. Automated checks use fakes only; no live smoke was run.
 
 ### Milestone 7 — Discord and operations
 
-**Status:** Not started; spec drafted
+**Status:** In progress; Tasks 2–7 implemented, acceptance review pending
 
 **Spec:** [`specs/010-discord-and-operations/`](../specs/010-discord-and-operations/SPEC.md)
 
@@ -165,6 +166,13 @@ estimated-cost limits. Preserve quiet routine repeats and timely material update
 **Complete when:** saved reports produce the intended alerts, delivery failures
 remain visible and recoverable, and usage controls hold across restarts. Acceptance
 checks pass; integrated live verification follows in Milestone 8.
+
+**Current slice:** SQLite v7 records delivery claims, submissions, receipts, retry
+state, and shared estimated model-cost reservations. One webhook adapter sends saved
+reports in live mode; local commands list, retry, and confirm held work. Console
+completion is durable before its output. Migration retains prior history and holds
+model calls on a legacy-spend migration day. Fake-provider tests cover this slice.
+Live scheduling, expanded status, and full-loop verification remain open.
 
 ### Milestone 8 — Full-loop hardening
 

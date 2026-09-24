@@ -70,6 +70,9 @@ def poll_and_classify_news(
     clock: Clock,
     prompt_version: str = CLASSIFIER_PROMPT_VERSION,
     model_version: str = CLASSIFIER_MODEL,
+    calls_per_day: int = CLASSIFIER_CALLS_PER_UTC_DAY,
+    calls_per_pass: int = CLASSIFIER_CALLS_PER_PASS,
+    budget_microdollars: int | None = None,
 ) -> NewsIngestResult:
     """Fetch, persist, filter, classify, and promote news for one pass."""
 
@@ -126,6 +129,9 @@ def poll_and_classify_news(
         clock=clock,
         prompt_version=prompt_version,
         model_version=model_version,
+        calls_per_day=calls_per_day,
+        calls_per_pass=calls_per_pass,
+        budget_microdollars=budget_microdollars,
     )
     result = NewsIngestResult(
         persisted_article_ids=tuple(persisted),
@@ -154,6 +160,9 @@ def _classify_pending(
     clock: Clock,
     prompt_version: str,
     model_version: str,
+    calls_per_day: int,
+    calls_per_pass: int,
+    budget_microdollars: int | None,
 ) -> NewsIngestResult:
     now = clock.now()
     window_start = now - NEWS_STARTUP_LOOKBACK
@@ -210,8 +219,9 @@ def _classify_pending(
                 deferred += 1
                 continue
             if (
-                pass_calls >= CLASSIFIER_CALLS_PER_PASS
-                or day_calls >= CLASSIFIER_CALLS_PER_UTC_DAY
+                pass_calls >= calls_per_pass
+                or day_calls >= calls_per_day
+                or storage.model_budget_migration_hold_on(now)
             ):
                 _persist_non_success(
                     storage,
@@ -221,10 +231,35 @@ def _classify_pending(
                     attempted_at=now,
                     prompt_version=prompt_version,
                     model_version=model_version,
-                    safe_error="classifier budget exhausted",
+                    safe_error=(
+                        "model budget migration hold"
+                        if storage.model_budget_migration_hold_on(now)
+                        else "classifier budget exhausted"
+                    ),
                 )
                 deferred += 1
                 continue
+            owner_id = None
+            if budget_microdollars is not None:
+                owner_id = storage.reserve_classifier_call(
+                    now=now,
+                    model_version=model_version,
+                    daily_calls=calls_per_day,
+                    budget_microdollars=budget_microdollars,
+                )
+                if owner_id is None:
+                    _persist_non_success(
+                        storage,
+                        article=article,
+                        ticker=ticker,
+                        status=ClassificationStatus.DEFERRED,
+                        attempted_at=now,
+                        prompt_version=prompt_version,
+                        model_version=model_version,
+                        safe_error="classifier model budget unavailable",
+                    )
+                    deferred += 1
+                    continue
             try:
                 result = classifier.classify(article, ticker)
             except Exception as error:
@@ -241,6 +276,12 @@ def _classify_pending(
                         else "classifier request failed"
                     ),
                 )
+            finally:
+                if owner_id is not None:
+                    storage.settle_model_request(
+                        owner_id, 1, usage=getattr(classifier, "last_usage", None)
+                    )
+                    storage.finish_model_run(owner_id)
             result = replace(
                 result,
                 article_id=article.article_id,
@@ -248,7 +289,8 @@ def _classify_pending(
                 prompt_version=prompt_version,
                 model_version=model_version,
             )
-            storage.record_classifier_call(utc_day)
+            if owner_id is None:
+                storage.record_classifier_call(utc_day)
             pass_calls += 1
             day_calls += 1
             storage.save_news_classification(result)

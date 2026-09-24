@@ -18,5 +18,6 @@ wheels/
 # Local application state
 investment_assistant.db
 live-run.sqlite3
+*.owner.lock
 
 .env

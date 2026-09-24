@@ -1,10 +1,10 @@
 # Feature Specification: Discord and Operations
 
-**Document status:** Refined draft — ready for implementation review
+**Document status:** Refined; implementation in progress
 
 **Milestone:** 7 — Discord and operations
 
-**Implementation status:** Not started
+**Implementation status:** In progress — Tasks 2–7 implemented; Milestone 7 open
 
 Behavior belongs here; [PLAN.md](PLAN.md) owns implementation and
 [TASKS.md](TASKS.md) owns execution. Durable decisions: D-030–D-032 in
@@ -19,12 +19,13 @@ repeating research, and bound model use across restarts. Keep one local process,
 SQLite, the existing market/news boundaries, and the event manager's eligibility
 rules. Neither the notifier nor the budget ledger decides significance.
 
-Today, `EventManager._notify` calls a console notifier before saving its result.
-SQLite v5 prevents multiple locally recorded successes but has no pre-send claim,
-receipt, retry schedule, destination, or uncertain-outcome state. Research already
-reserves starts before I/O (20/day); classification counts calls after I/O
-(100/day, 20/pass). There is no shared USD ledger and no six-hour cooldown timer.
-This spec closes those gaps; it does not claim they are already implemented.
+Before this milestone, `EventManager._notify` called a console notifier before saving
+its result. SQLite v5 prevented multiple locally recorded successes but had no
+pre-send claim, receipt, retry schedule, destination, or uncertain-outcome state.
+Tasks 2–7 add SQLite v7, the live Discord path, local recovery commands, durable
+console completion, and shared model-use admission. Live scheduling and expanded
+operational status remain later tasks. There is no six-hour cooldown timer.
+Implementation evidence is tracked in [TASKS.md](TASKS.md).
 
 ## Scope
 

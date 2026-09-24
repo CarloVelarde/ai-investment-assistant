@@ -12,6 +12,12 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from investment_assistant.clock import Clock
+from investment_assistant.model_budget import (
+    CLASSIFIER_MODEL as CLASSIFIER_MODEL,
+)
+from investment_assistant.model_budget import (
+    extract_usage,
+)
 from investment_assistant.models import (
     MAX_NEWS_RATIONALE_CHARS,
     ClassificationStatus,
@@ -22,7 +28,6 @@ from investment_assistant.models import (
     SignalImportance,
 )
 
-CLASSIFIER_MODEL = "gpt-5.4-nano-2026-03-17"
 CLASSIFIER_PROMPT_VERSION = "news-classifier-v1"
 CLASSIFIER_CONFIDENCE_FLOOR = 0.70
 CLASSIFIER_TIMEOUT_SECONDS = 20
@@ -148,14 +153,17 @@ class OpenAINewsClassifier:
         self._api_key = api_key
         self._model = model
         self._prompt_version = prompt_version
+        self.last_usage: tuple[int, int] | None = None
 
     def classify(self, article: NewsArticle, ticker: str) -> NewsClassification:
         """Classify one article/ticker pair and persist-ready internal result."""
 
         attempted_at = self._clock.now()
         normalized_ticker = ticker.strip().upper()
+        self.last_usage = None
         try:
             response = self._http.post_responses(self._request_payload(article, ticker))
+            self.last_usage = extract_usage(response.body)
             if response.status_code != 200:
                 raise NewsClassifierError(
                     f"classifier request failed with status {response.status_code}"
@@ -188,6 +196,7 @@ class OpenAINewsClassifier:
         return {
             "model": self._model,
             "store": False,
+            "max_output_tokens": 2000,
             "input": [
                 {"role": "system", "content": CLASSIFIER_SYSTEM_PROMPT},
                 {"role": "user", "content": _user_prompt(article, ticker)},

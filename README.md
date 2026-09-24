@@ -19,11 +19,13 @@ flowchart LR
 
 Related updates stay on the same case so you are not flooded with repeats. Significant good news and bad news can both start a case. Details live in the [architecture](docs/ARCHITECTURE.md).
 
-Current output is console-only. Market monitoring, news classification, and bounded
-research are implemented. [Spec 010](specs/010-discord-and-operations/SPEC.md) defines
-the next milestone: Discord delivery and operations. [Spec 011](specs/011-full-loop-hardening/SPEC.md)
-defines the final replay and live-verification gate. Both are drafts with implementation
-or execution still pending; see the [roadmap](docs/ROADMAP.md) for evidence and limits.
+Market monitoring, news classification, and bounded research are implemented.
+Milestone 7 is in progress: live mode can deliver a saved report to one Discord
+webhook with durable claims, receipts, finite retries, local recovery commands,
+and a shared estimated model-cost ledger. Expanded status and final integration
+checks remain open in
+[Spec 010](specs/010-discord-and-operations/SPEC.md). [Spec 011](specs/011-full-loop-hardening/SPEC.md)
+owns final replay and live verification; see the [roadmap](docs/ROADMAP.md).
 
 ## Setup
 
@@ -41,12 +43,40 @@ Edit `.env` before a live run. Never commit `.env`.
 | ----------------------------------------------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------- |
 | `INVESTMENT_ASSISTANT_ALPACA_API_KEY_ID` and `INVESTMENT_ASSISTANT_ALPACA_API_SECRET_KEY` | Live prices, the stock socket, and Alpaca news | Offline fixture demo                                                             |
 | `INVESTMENT_ASSISTANT_OPENAI_API_KEY`                                                     | Live news classification and research          | Articles are saved; classification and new research are deferred. Saved reports can still be delivered. |
+| `INVESTMENT_ASSISTANT_DISCORD_WEBHOOK_URL`                                                | Live Discord alerts for saved reports          | Reports use console delivery. |
 | `INVESTMENT_ASSISTANT_SEC_USER_AGENT`                                                     | Optional SEC contact string during research    | Filing lookups stay off. Local and web research still run.                       |
 | `INVESTMENT_ASSISTANT_WATCHLIST`                                                          | Symbols to watch in live mode                  | Live start is rejected                                                           |
+| `INVESTMENT_ASSISTANT_RESEARCH_STARTS_PER_DAY` | New research starts per UTC day (default 20, max 20) | Set to `0` to defer new research. |
+| `INVESTMENT_ASSISTANT_CLASSIFIER_CALLS_PER_DAY` / `INVESTMENT_ASSISTANT_CLASSIFIER_CALLS_PER_PASS` | News classifier limits (defaults 100 / 20; maxima 100 / 20) | Set either to `0` to defer classification. |
+| `INVESTMENT_ASSISTANT_DAILY_MODEL_BUDGET_USD` | Shared estimated OpenAI budget per UTC day (default $2.00, max $10.00) | Set to `0` to defer new model calls. Saved reports still deliver. |
 
 - Alpaca keys come from your Alpaca account. The default feed is `iex`.
 - Create an OpenAI key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+- Create an incoming webhook in the intended Discord channel and keep its URL only
+  in local `.env`. A bot token is not needed. A changed webhook does not replay
+  completed reports. An uncertain send waits 15 minutes for one automatic resend;
+  it may duplicate the first alert. If that resend cannot finish, the delivery is
+  held. Keep the original webhook available for receipt confirmation.
 - For the SEC value, use a short contact string such as `Your Name you@example.com`.
+
+Discord has not had a live smoke test in this milestone. Automated tests use a fake
+HTTP transport and fake providers; full-loop live checks belong to Milestone 8.
+Use `uv run python -m investment_assistant notifications list` to inspect held or
+failed delivery IDs. With the live loop stopped, use
+`uv run python -m investment_assistant notifications confirm --delivery-id ID --message-id ID`
+after finding the message in Discord, or
+`uv run python -m investment_assistant notifications retry --delivery-id ID --accept-duplicate-risk`
+to authorize one extra send on the next live pass. Retry can duplicate an alert;
+confirmation only reads the message. Provider waits still apply. An automatic
+uncertain resend must finish or be confirmed before a manual retry can be authorized.
+
+The SQLite v7 upgrade preserves prior reports and notification history. A v5 or v6
+database with earlier model calls on the upgrade's UTC day has unknown spend, so
+new model calls wait until the next UTC day; saved reports can still deliver.
+The $2 default reserves up to $1.62 for a new research run and $0.0825 for a
+classifier call before I/O, then releases unused allowance when recorded usage is
+valid. Failed or interrupted requests retain conservative charges. These are
+application estimates, not an invoice or an account-wide spending limit.
 
 ## Checks
 

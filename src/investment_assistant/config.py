@@ -1,10 +1,11 @@
 """Application configuration"""
 
+from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MAX_LIVE_WATCHLIST_SYMBOLS = 30
@@ -58,14 +59,20 @@ class Settings(BaseSettings):
     alpaca_feed: Literal["iex", "sip"] = "iex"
     alpaca_trading_url: str = DEFAULT_ALPACA_TRADING_URL
     openai_api_key: SecretStr = SecretStr("")
+    discord_webhook_url: SecretStr = SecretStr("")
     sec_user_agent: str = ""
     watchlist: str = ""
+    research_starts_per_day: int = 20
+    classifier_calls_per_day: int = 100
+    classifier_calls_per_pass: int = 20
+    daily_model_budget_usd: Decimal = Decimal("2.00")
 
     model_config = SettingsConfigDict(
         env_prefix="INVESTMENT_ASSISTANT_",
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     @field_validator("alpaca_api_key_id", "watchlist", "sec_user_agent", mode="before")
@@ -75,7 +82,9 @@ class Settings(BaseSettings):
             return value.strip()
         return value
 
-    @field_validator("alpaca_api_secret_key", "openai_api_key", mode="before")
+    @field_validator(
+        "alpaca_api_secret_key", "openai_api_key", "discord_webhook_url", mode="before"
+    )
     @classmethod
     def _strip_secret(cls, value: object) -> object:
         if isinstance(value, str):
@@ -91,6 +100,43 @@ class Settings(BaseSettings):
             return value.strip().lower()
         return value
 
+    @field_validator(
+        "research_starts_per_day",
+        "classifier_calls_per_day",
+        "classifier_calls_per_pass",
+        mode="before",
+    )
+    @classmethod
+    def _bounded_call_limit(cls, value: object, info: ValidationInfo) -> int:
+        field = info.field_name
+        maximum = 20 if field != "classifier_calls_per_day" else 100
+        raw = str(value)
+        if isinstance(value, bool) or not raw.isdigit() or int(raw) > maximum:
+            raise ValueError("invalid model call limit")
+        return int(raw)
+
+    @field_validator("daily_model_budget_usd", mode="before")
+    @classmethod
+    def _bounded_usd(cls, value: object) -> Decimal:
+        try:
+            amount = Decimal(str(value))
+        except InvalidOperation as error:
+            raise ValueError("invalid daily model budget") from error
+        exponent = amount.as_tuple().exponent
+        if (
+            not amount.is_finite()
+            or amount < 0
+            or amount > 10
+            or not isinstance(exponent, int)
+            or exponent < -2
+        ):
+            raise ValueError("invalid daily model budget")
+        return amount
+
+    @property
+    def model_budget_microdollars(self) -> int:
+        return int(self.daily_model_budget_usd * 1_000_000)
+
     @field_validator("alpaca_trading_url", mode="before")
     @classmethod
     def _normalize_trading_url(cls, value: object) -> object:
@@ -101,6 +147,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _reject_invalid_live_watchlist(self) -> Self:
+        webhook = self.discord_webhook_url.get_secret_value()
+        if webhook and self.live_mode:
+            from investment_assistant.discord_notify import validate_webhook_url
+
+            validate_webhook_url(webhook)
         if self.live_mode:
             resolve_live_watchlist(self.watchlist)
         return self

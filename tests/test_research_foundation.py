@@ -583,7 +583,7 @@ def test_v4_migration_preserves_completed_fake_and_pending_delivery(
         connection.execute("PRAGMA user_version = 4")
     with SQLiteStorage(path) as storage:
         storage.initialize()
-        assert storage.database_version == DATABASE_VERSION == 5
+        assert storage.database_version == DATABASE_VERSION == 7
         legacy = storage.get_report_for_update(EVENT.event_id, 1)
         assert legacy is not None
         assert legacy.is_fake

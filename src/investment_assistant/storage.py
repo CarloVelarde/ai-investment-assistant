@@ -34,6 +34,14 @@ from typing import Literal
 from uuid import uuid4
 
 from investment_assistant.market_data import is_regular_session_minute
+from investment_assistant.model_budget import (
+    CLASSIFIER_ALLOWANCE,
+    POLICY_VERSION,
+    RESEARCH_ALLOWANCE,
+    RESEARCH_REQUEST_ALLOWANCE,
+    SEARCH_FEE,
+    token_charge,
+)
 from investment_assistant.models import (
     ClassificationStatus,
     DetectorState,
@@ -66,7 +74,7 @@ from investment_assistant.models import (
     _as_utc,
 )
 
-DATABASE_VERSION = 5
+DATABASE_VERSION = 7
 
 _MARKET_HISTORY_TABLES = """
 CREATE TABLE IF NOT EXISTS market_bars (
@@ -275,11 +283,106 @@ CREATE TABLE IF NOT EXISTS research_deferrals (
 CREATE INDEX IF NOT EXISTS research_signal_time_idx ON signals(event_id, occurred_at, signal_id);
 """
 
+_DELIVERY_TABLES = """
+CREATE TABLE IF NOT EXISTS notification_deliveries (
+    delivery_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL REFERENCES events(event_id),
+    event_update INTEGER NOT NULL CHECK (event_update >= 1),
+    destination TEXT NOT NULL CHECK (destination IN ('console', 'discord')),
+    destination_fingerprint TEXT,
+    state TEXT NOT NULL CHECK (state IN (
+        'READY', 'CLAIMED', 'ACKNOWLEDGED', 'SUCCEEDED', 'RETRY_WAIT',
+        'PERMANENT_FAILURE', 'UNCERTAIN', 'SUPERSEDED')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    next_attempt_at TEXT,
+    uncertain_since TEXT,
+    resend_not_before TEXT,
+    uncertain_resend_used INTEGER NOT NULL DEFAULT 0 CHECK (uncertain_resend_used IN (0, 1)),
+    ordinary_count INTEGER NOT NULL DEFAULT 0 CHECK (ordinary_count BETWEEN 0 AND 5),
+    active_attempt_id TEXT,
+    message_id TEXT,
+    completed_at TEXT,
+    safe_reason TEXT,
+    manual_authorized INTEGER NOT NULL DEFAULT 0 CHECK (manual_authorized IN (0, 1)),
+    CHECK ((destination = 'console' AND destination_fingerprint IS NULL)
+        OR (destination = 'discord' AND destination_fingerprint IS NOT NULL)),
+    CHECK ((state = 'CLAIMED') = (active_attempt_id IS NOT NULL)),
+    CHECK (state NOT IN ('ACKNOWLEDGED', 'SUCCEEDED')
+        OR destination = 'console' OR message_id IS NOT NULL),
+    CHECK ((state = 'SUCCEEDED') = (completed_at IS NOT NULL)),
+    CHECK (state != 'UNCERTAIN' OR (uncertain_since IS NOT NULL
+        AND resend_not_before IS NOT NULL)),
+    UNIQUE (event_id, event_update)
+);
+CREATE INDEX IF NOT EXISTS notification_deliveries_state_idx
+    ON notification_deliveries(state, next_attempt_at, created_at);
+CREATE TABLE IF NOT EXISTS notification_submissions (
+    attempt_id TEXT PRIMARY KEY,
+    delivery_id TEXT NOT NULL REFERENCES notification_deliveries(delivery_id),
+    destination_fingerprint TEXT,
+    attempt_number INTEGER NOT NULL CHECK (attempt_number >= 1),
+    resend INTEGER NOT NULL CHECK (resend IN (0, 1)),
+    claimed_at TEXT NOT NULL,
+    completed_at TEXT,
+    outcome TEXT CHECK (outcome IN (
+        'ACKNOWLEDGED', 'DEFINITE_RETRY', 'PERMANENT', 'UNCERTAIN')),
+    message_id TEXT,
+    safe_reason TEXT,
+    CHECK ((outcome IS NULL) = (completed_at IS NULL)),
+    UNIQUE (delivery_id, attempt_number)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS one_open_notification_claim_idx
+    ON notification_submissions(delivery_id) WHERE outcome IS NULL;
+CREATE TABLE IF NOT EXISTS notification_destination_state (
+    fingerprint TEXT PRIMARY KEY,
+    wait_until TEXT,
+    disabled_reason TEXT
+);
+CREATE TABLE IF NOT EXISTS notification_global_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    wait_until TEXT
+);
+CREATE TABLE IF NOT EXISTS model_budget_migration_hold (
+    utc_day TEXT PRIMARY KEY,
+    reason TEXT NOT NULL
+);
+"""
+
+_BUDGET_TABLES = """
+CREATE TABLE IF NOT EXISTS model_budget_runs (
+    owner_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('research', 'classifier')),
+    utc_day TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    policy_version TEXT NOT NULL,
+    reserved_microdollars INTEGER NOT NULL CHECK (reserved_microdollars >= 0),
+    charged_microdollars INTEGER NOT NULL CHECK (charged_microdollars >= 0),
+    state TEXT NOT NULL CHECK (state IN ('ACTIVE', 'FINISHED')),
+    overrun INTEGER NOT NULL DEFAULT 0 CHECK (overrun IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS model_budget_runs_day_idx ON model_budget_runs(utc_day);
+CREATE TABLE IF NOT EXISTS model_budget_requests (
+    owner_id TEXT NOT NULL REFERENCES model_budget_runs(owner_id),
+    request_number INTEGER NOT NULL CHECK (request_number >= 1),
+    reserved_microdollars INTEGER NOT NULL,
+    charged_microdollars INTEGER NOT NULL,
+    search_slots INTEGER NOT NULL,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    search_calls INTEGER,
+    state TEXT NOT NULL CHECK (state IN ('STARTED', 'SETTLED')),
+    PRIMARY KEY(owner_id, request_number)
+);
+"""
+
 _SCHEMA = (
     _CORE_TABLES
     + _MARKET_HISTORY_TABLES
     + _NEWS_TABLES
     + _RESEARCH_TABLES
+    + _DELIVERY_TABLES
+    + _BUDGET_TABLES
     + f"\nPRAGMA user_version = {DATABASE_VERSION};\n"
 )
 
@@ -320,11 +423,11 @@ class SQLiteStorage:
     ) -> None:
         self.close()
 
-    def initialize(self) -> None:
+    def initialize(self, *, now: datetime | None = None) -> None:
         """Create or upgrade the layout, or validate the current version."""
 
         version = self.database_version
-        if version not in (0, 1, 2, 3, 4, DATABASE_VERSION):
+        if version not in (0, 1, 2, 3, 4, 5, 6, DATABASE_VERSION):
             raise ValueError(f"unsupported SQLite database version: {version}")
         if version == 0:
             self._run_script_atomically(_SCHEMA)
@@ -340,8 +443,75 @@ class SQLiteStorage:
             version = 4
         if version == 4:
             self._migrate_v4_to_v5()
+            version = 5
+        if version == 5:
+            self._migrate_v5_to_v6(now or datetime.now(UTC))
+            version = 6
+        if version == 6:
+            self._migrate_v6_to_v7(now or datetime.now(UTC))
         self._run_script_atomically(_SCHEMA)
         self._reconcile_research_attempts()
+        self._recover_model_budget_runs()
+
+    def _migrate_v6_to_v7(self, now: datetime) -> None:
+        """Remove the automatic-attempt bound from operator submissions."""
+
+        with self.transaction():
+            self._connection.execute(
+                "ALTER TABLE notification_submissions RENAME TO old_notification_submissions"
+            )
+            self._connection.execute(
+                """CREATE TABLE notification_submissions (
+                attempt_id TEXT PRIMARY KEY,
+                delivery_id TEXT NOT NULL REFERENCES notification_deliveries(delivery_id),
+                destination_fingerprint TEXT,
+                attempt_number INTEGER NOT NULL CHECK (attempt_number >= 1),
+                resend INTEGER NOT NULL CHECK (resend IN (0, 1)),
+                claimed_at TEXT NOT NULL, completed_at TEXT,
+                outcome TEXT CHECK (outcome IN ('ACKNOWLEDGED', 'DEFINITE_RETRY', 'PERMANENT', 'UNCERTAIN')),
+                message_id TEXT, safe_reason TEXT,
+                CHECK ((outcome IS NULL) = (completed_at IS NULL)),
+                UNIQUE (delivery_id, attempt_number))"""
+            )
+            self._connection.execute(
+                """INSERT INTO notification_submissions
+                (attempt_id, delivery_id, destination_fingerprint, attempt_number,
+                 resend, claimed_at, completed_at, outcome, message_id, safe_reason)
+                SELECT s.attempt_id, s.delivery_id, d.destination_fingerprint,
+                       s.attempt_number, s.resend, s.claimed_at, s.completed_at,
+                       s.outcome, s.message_id, s.safe_reason
+                FROM old_notification_submissions s JOIN notification_deliveries d
+                ON d.delivery_id = s.delivery_id"""
+            )
+            self._connection.execute("DROP TABLE old_notification_submissions")
+            self._connection.execute(
+                "CREATE UNIQUE INDEX one_open_notification_claim_idx ON notification_submissions(delivery_id) WHERE outcome IS NULL"
+            )
+            for statement in _BUDGET_TABLES.split(";"):
+                if statement.strip():
+                    self._connection.execute(statement)
+            day = _as_utc(now, "now").date().isoformat()
+            legacy = self._connection.execute(
+                """SELECT 1 FROM research_attempts WHERE substr(started_at, 1, 10) = ?
+                UNION SELECT 1 FROM classifier_budget WHERE utc_day = ? AND call_count > 0""",
+                (day, day),
+            ).fetchone()
+            if legacy:
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO model_budget_migration_hold VALUES (?, 'LEGACY_SPEND_UNKNOWN')",
+                    (day,),
+                )
+            self._connection.execute("PRAGMA user_version = 7")
+
+    def _recover_model_budget_runs(self) -> None:
+        """On startup, charge submitted requests and release unused run slots."""
+
+        with self.transaction():
+            rows = self._connection.execute(
+                "SELECT owner_id FROM model_budget_runs WHERE state = 'ACTIVE'"
+            ).fetchall()
+            for row in rows:
+                self.finish_model_run(str(row["owner_id"]))
 
     def _reconcile_research_attempts(self) -> None:
         """A saved report is authoritative if older bookkeeping was interrupted."""
@@ -429,6 +599,39 @@ class SQLiteStorage:
             + _RESEARCH_TABLES
             + "\nPRAGMA user_version = 5;"
         )
+
+    def _migrate_v5_to_v6(self, now: datetime) -> None:
+        """Upgrade delivery history without replaying old console output."""
+
+        day = _as_utc(now, "now").date().isoformat()
+        with self.transaction():
+            for statement in _DELIVERY_TABLES.split(";"):
+                if statement.strip():
+                    self._connection.execute(statement)
+            self._connection.execute(
+                """INSERT OR IGNORE INTO notification_deliveries
+                (delivery_id, event_id, event_update, destination, state,
+                 created_at, updated_at, completed_at)
+                SELECT 'delivery:' || event_id || ':' || event_update,
+                       event_id, event_update, 'console', 'SUCCEEDED',
+                       attempted_at, attempted_at, attempted_at
+                FROM notification_attempts WHERE succeeded = 1"""
+            )
+            legacy_research = self._connection.execute(
+                "SELECT 1 FROM research_attempts WHERE substr(started_at, 1, 10) = ? LIMIT 1",
+                (day,),
+            ).fetchone()
+            legacy_classification = self._connection.execute(
+                "SELECT 1 FROM classifier_budget WHERE utc_day = ? AND call_count > 0",
+                (day,),
+            ).fetchone()
+            if legacy_research or legacy_classification:
+                self._connection.execute(
+                    """INSERT OR IGNORE INTO model_budget_migration_hold
+                    (utc_day, reason) VALUES (?, 'LEGACY_SPEND_UNKNOWN')""",
+                    (day,),
+                )
+            self._connection.execute("PRAGMA user_version = 6")
 
     def _table_exists(self, table: str) -> bool:
         row = self._connection.execute(
@@ -648,6 +851,188 @@ class SQLiteStorage:
             (deferral.event_id, deferral.event_update, deferral.model_dump_json()),
         )
 
+    def model_budget_used(self, utc_day: str) -> int:
+        row = self._connection.execute(
+            """SELECT COALESCE(SUM(charged_microdollars + reserved_microdollars), 0)
+            FROM model_budget_runs WHERE utc_day = ?""",
+            (utc_day,),
+        ).fetchone()
+        return int(row[0])
+
+    def model_budget_overrun(self, utc_day: str) -> bool:
+        return (
+            self._connection.execute(
+                "SELECT 1 FROM model_budget_runs WHERE utc_day = ? AND overrun = 1 LIMIT 1",
+                (utc_day,),
+            ).fetchone()
+            is not None
+        )
+
+    def _reserve_model_run(
+        self,
+        owner_id: str,
+        kind: Literal["research", "classifier"],
+        model_version: str,
+        now: datetime,
+        allowance: int,
+        budget_microdollars: int,
+    ) -> bool:
+        day = _as_utc(now, "now").date().isoformat()
+        if (
+            self.model_budget_migration_hold_on(now)
+            or self.model_budget_overrun(day)
+            or self.model_budget_used(day) + allowance > budget_microdollars
+        ):
+            return False
+        try:
+            token_charge(model_version, 0, 0)
+        except ValueError:
+            return False
+        self._connection.execute(
+            """INSERT INTO model_budget_runs
+            (owner_id, kind, utc_day, model_version, policy_version,
+             reserved_microdollars, charged_microdollars, state)
+            VALUES (?, ?, ?, ?, ?, ?, 0, 'ACTIVE')""",
+            (owner_id, kind, day, model_version, POLICY_VERSION, allowance),
+        )
+        return True
+
+    def reserve_classifier_call(
+        self,
+        *,
+        now: datetime,
+        model_version: str,
+        daily_calls: int,
+        budget_microdollars: int,
+    ) -> str | None:
+        """Count and reserve one classifier request in a single write transaction."""
+
+        day = _as_utc(now, "now").date().isoformat()
+        with self.transaction():
+            self._connection.execute(
+                "UPDATE classifier_budget SET call_count = call_count WHERE 0"
+            )
+            if self.classifier_call_count(day) >= daily_calls:
+                return None
+            owner_id = f"classifier:{uuid4()}"
+            if not self._reserve_model_run(
+                owner_id,
+                "classifier",
+                model_version,
+                now,
+                CLASSIFIER_ALLOWANCE,
+                budget_microdollars,
+            ):
+                return None
+            self._connection.execute(
+                """INSERT INTO model_budget_requests
+                (owner_id, request_number, reserved_microdollars, charged_microdollars,
+                 search_slots, state) VALUES (?, 1, ?, ?, 0, 'STARTED')""",
+                (owner_id, CLASSIFIER_ALLOWANCE, CLASSIFIER_ALLOWANCE),
+            )
+            self.record_classifier_call(day)
+            return owner_id
+
+    def start_research_request(self, owner_id: str, *, search_slots: int) -> int:
+        """Record a model request and its granted search allowance before I/O."""
+
+        with self.transaction():
+            run = self._connection.execute(
+                "SELECT * FROM model_budget_runs WHERE owner_id = ? AND kind = 'research' AND state = 'ACTIVE'",
+                (owner_id,),
+            ).fetchone()
+            if run is None or not 0 <= search_slots <= 3:
+                raise ValueError("research budget run unavailable")
+            used = self._connection.execute(
+                """SELECT count(*), COALESCE(sum(COALESCE(search_calls, search_slots)), 0)
+                FROM model_budget_requests WHERE owner_id = ?""",
+                (owner_id,),
+            ).fetchone()
+            if int(used[0]) >= 5 or int(used[1]) + search_slots > 3:
+                raise ValueError("research request allowance exhausted")
+            number = int(used[0]) + 1
+            allowance = RESEARCH_REQUEST_ALLOWANCE + search_slots * SEARCH_FEE
+            self._connection.execute(
+                """INSERT INTO model_budget_requests
+                (owner_id, request_number, reserved_microdollars, charged_microdollars,
+                 search_slots, state) VALUES (?, ?, ?, ?, ?, 'STARTED')""",
+                (owner_id, number, allowance, allowance, search_slots),
+            )
+            return number
+
+    def settle_model_request(
+        self,
+        owner_id: str,
+        number: int,
+        *,
+        usage: tuple[int, int] | None,
+        search_calls: int | None = None,
+    ) -> None:
+        """Settle once; missing usage/search counts keep their full allocation."""
+
+        with self.transaction():
+            request = self._connection.execute(
+                "SELECT * FROM model_budget_requests WHERE owner_id = ? AND request_number = ?",
+                (owner_id, number),
+            ).fetchone()
+            run = self._connection.execute(
+                "SELECT * FROM model_budget_runs WHERE owner_id = ?",
+                (owner_id,),
+            ).fetchone()
+            if request is None or run is None or request["state"] == "SETTLED":
+                return
+            known_search = search_calls is not None and search_calls >= 0
+            charge = int(request["reserved_microdollars"])
+            if usage is not None:
+                charge = token_charge(str(run["model_version"]), *usage)
+                if run["kind"] == "research":
+                    charge += (
+                        int(search_calls)
+                        if known_search and search_calls is not None
+                        else int(request["search_slots"])
+                    ) * SEARCH_FEE
+            self._connection.execute(
+                """UPDATE model_budget_requests SET charged_microdollars = ?,
+                input_tokens = ?, output_tokens = ?, search_calls = ?, state = 'SETTLED'
+                WHERE owner_id = ? AND request_number = ?""",
+                (
+                    charge,
+                    usage[0] if usage else None,
+                    usage[1] if usage else None,
+                    search_calls if known_search else None,
+                    owner_id,
+                    number,
+                ),
+            )
+            if charge > int(request["reserved_microdollars"]) or (
+                search_calls is not None and search_calls > int(request["search_slots"])
+            ):
+                self._connection.execute(
+                    "UPDATE model_budget_runs SET overrun = 1 WHERE owner_id = ?",
+                    (owner_id,),
+                )
+
+    def finish_model_run(self, owner_id: str) -> None:
+        with self.transaction():
+            run = self._connection.execute(
+                "SELECT state, reserved_microdollars FROM model_budget_runs WHERE owner_id = ?",
+                (owner_id,),
+            ).fetchone()
+            if run is None or run["state"] == "FINISHED":
+                return
+            charged = int(
+                self._connection.execute(
+                    "SELECT COALESCE(sum(charged_microdollars), 0) FROM model_budget_requests WHERE owner_id = ?",
+                    (owner_id,),
+                ).fetchone()[0]
+            )
+            self._connection.execute(
+                """UPDATE model_budget_runs SET state = 'FINISHED', reserved_microdollars = 0,
+                charged_microdollars = ?, overrun = CASE WHEN ? > reserved_microdollars
+                THEN 1 ELSE overrun END WHERE owner_id = ?""",
+                (charged, charged, owner_id),
+            )
+
     def reserve_research_attempt(
         self,
         event_id: str,
@@ -657,6 +1042,8 @@ class SQLiteStorage:
         model_version: str,
         prompt_version: str,
         has_api_key: bool,
+        daily_starts: int = 20,
+        budget_microdollars: int | None = None,
     ) -> ResearchAttempt | None:
         """Reserve a durable start before I/O; deferrals never consume a start."""
         now = _as_utc(now, "now")
@@ -674,10 +1061,38 @@ class SQLiteStorage:
                 or self.get_report_for_update(event_id, event_update) is not None
             ):
                 return None
-            if not has_api_key or self.research_starts_on(now) >= 20:
-                reason: Literal["MISSING_KEY", "DAILY_BUDGET"] = (
-                    "MISSING_KEY" if not has_api_key else "DAILY_BUDGET"
-                )
+            reason: (
+                Literal[
+                    "MISSING_KEY",
+                    "DAILY_BUDGET",
+                    "MODEL_BUDGET",
+                    "UNKNOWN_PRICING",
+                    "MIGRATION_HOLD",
+                    "ESTIMATION_OVERRUN",
+                ]
+                | None
+            ) = None
+            day = now.date().isoformat()
+            if not has_api_key:
+                reason = "MISSING_KEY"
+            elif self.model_budget_migration_hold_on(now):
+                reason = "MIGRATION_HOLD"
+            elif self.research_starts_on(now) >= daily_starts:
+                reason = "DAILY_BUDGET"
+            elif budget_microdollars is not None:
+                try:
+                    token_charge(model_version, 0, 0)
+                except ValueError:
+                    reason = "UNKNOWN_PRICING"
+                if reason is None and self.model_budget_overrun(day):
+                    reason = "ESTIMATION_OVERRUN"
+                if (
+                    reason is None
+                    and self.model_budget_used(day) + RESEARCH_ALLOWANCE
+                    > budget_microdollars
+                ):
+                    reason = "MODEL_BUDGET"
+            if reason is not None:
                 retry = (
                     None
                     if not has_api_key
@@ -713,6 +1128,15 @@ class SQLiteStorage:
                 model_version=model_version,
                 prompt_version=prompt_version,
             )
+            if budget_microdollars is not None and not self._reserve_model_run(
+                attempt.attempt_id,
+                "research",
+                model_version,
+                now,
+                RESEARCH_ALLOWANCE,
+                budget_microdollars,
+            ):
+                raise RuntimeError("model budget admission changed during reservation")
             self._connection.execute(
                 """INSERT INTO research_attempts
                 (attempt_id, event_id, event_update, started_at, status, retry_not_before, details)
@@ -1041,6 +1465,20 @@ class SQLiteStorage:
             self._write_notification_attempt(attempt)
             if failure is None:
                 self._connection.execute(
+                    """INSERT OR IGNORE INTO notification_deliveries
+                    (delivery_id, event_id, event_update, destination, state,
+                     created_at, updated_at, completed_at)
+                    VALUES (?, ?, ?, 'console', 'SUCCEEDED', ?, ?, ?)""",
+                    (
+                        f"delivery:{attempt.event_id}:{attempt.event_update}",
+                        attempt.event_id,
+                        attempt.event_update,
+                        _timestamp(attempt.attempted_at),
+                        _timestamp(updated_at),
+                        _timestamp(updated_at),
+                    ),
+                )
+                self._connection.execute(
                     """
                     UPDATE events
                     SET status = ?, updated_at = ?, last_notified_at = ?
@@ -1049,7 +1487,7 @@ class SQLiteStorage:
                     (
                         EventStatus.NOTIFIED.value,
                         _timestamp(updated_at),
-                        _timestamp(attempt.attempted_at),
+                        _timestamp(updated_at),
                         attempt.event_id,
                         attempt.event_update,
                     ),
@@ -1093,6 +1531,17 @@ class SQLiteStorage:
             )
             for row in rows
         )
+
+    def has_external_delivery(self, event_id: str, event_update: int) -> bool:
+        """Keep prior external work out of the console fallback path."""
+
+        row = self._connection.execute(
+            """SELECT 1 FROM notification_deliveries
+            WHERE event_id = ? AND event_update = ? AND destination = 'discord'
+              AND state != 'SUPERSEDED'""",
+            (event_id, event_update),
+        ).fetchone()
+        return row is not None
 
     def save_failure(self, failure: ProcessingFailure) -> None:
         """Persist one safe processing failure."""
@@ -1438,6 +1887,18 @@ class SQLiteStorage:
             (utc_day,),
         ).fetchone()
         return 0 if row is None else int(row["call_count"])
+
+    def model_budget_migration_hold_on(self, now: datetime) -> bool:
+        """Legacy model calls have unknown spend for their UTC migration day."""
+
+        day = _as_utc(now, "now").date().isoformat()
+        return (
+            self._connection.execute(
+                "SELECT 1 FROM model_budget_migration_hold WHERE utc_day = ?",
+                (day,),
+            ).fetchone()
+            is not None
+        )
 
     def record_classifier_call(self, utc_day: str) -> int:
         """Increment the UTC-day classifier counter and return the new count."""

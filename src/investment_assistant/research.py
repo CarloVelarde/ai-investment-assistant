@@ -31,6 +31,7 @@ from investment_assistant.research_model import (
     RESEARCH_MODEL,
     RESEARCH_PROMPT_VERSION,
     FunctionCall,
+    ModelTurn,
     ResearchModel,
     research_request,
 )
@@ -335,12 +336,16 @@ class ResearchRunner:
         sec: SecClient,
         clock: Clock,
         monotonic: Callable[[], float] = time.monotonic,
+        daily_starts: int = 20,
+        budget_microdollars: int | None = None,
     ) -> None:
         self._storage = storage
         self._model = model
         self._sec = sec
         self._clock = clock
         self._monotonic = monotonic
+        self._daily_starts = daily_starts
+        self._budget_microdollars = budget_microdollars
 
     def __call__(self, event: Event, signals: tuple[Signal, ...]) -> ResearchReport:
         deadline = Deadline.start(self._monotonic)
@@ -351,6 +356,8 @@ class ResearchRunner:
             model_version=RESEARCH_MODEL,
             prompt_version=RESEARCH_PROMPT_VERSION,
             has_api_key=self._model is not None and self._model.configured,
+            daily_starts=self._daily_starts,
+            budget_microdollars=self._budget_microdollars,
         )
         if attempt is None:
             raise ResearchDeferred("Research deferred before any provider call.")
@@ -371,6 +378,9 @@ class ResearchRunner:
             raise ResearchError(
                 "Research failed; the current update may be retried."
             ) from None
+        finally:
+            if self._budget_microdollars is not None:
+                self._storage.finish_model_run(attempt.attempt_id)
 
     def _investigate(
         self, attempt_id: str, packet: EvidencePacket, deadline: Deadline
@@ -416,12 +426,42 @@ class ResearchRunner:
                 deadline.remaining()
                 usage = usage.model_copy(update={"model_calls": usage.model_calls + 1})
                 persist()
-                response = self._model.respond(
-                    tuple(inputs),
-                    search_cap=search_cap,
-                    tools_enabled=not final,
-                    deadline=deadline,
+                request_number = (
+                    self._storage.start_research_request(
+                        attempt_id, search_slots=search_cap
+                    )
+                    if self._budget_microdollars is not None
+                    else None
                 )
+                response: ModelTurn | None = None
+                try:
+                    response = self._model.respond(
+                        tuple(inputs),
+                        search_cap=search_cap,
+                        tools_enabled=not final,
+                        deadline=deadline,
+                    )
+                finally:
+                    if request_number is not None:
+                        observed = (
+                            (response.input_tokens, response.output_tokens)
+                            if response is not None
+                            and response.input_tokens is not None
+                            and response.output_tokens is not None
+                            else getattr(self._model, "last_usage", None)
+                        )
+                        searches = (
+                            response.web_calls
+                            if response is not None
+                            else getattr(self._model, "last_search_calls", None)
+                        )
+                        self._storage.settle_model_request(
+                            attempt_id,
+                            request_number,
+                            usage=observed,
+                            search_calls=searches,
+                        )
+                assert response is not None
                 deadline.remaining()
                 if (
                     response.web_calls < 0
