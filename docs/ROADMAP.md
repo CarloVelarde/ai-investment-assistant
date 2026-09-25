@@ -173,8 +173,10 @@ completion is durable before its output. Migration retains prior history and hol
 model calls on a legacy-spend migration day. One due external send runs before
 one research attempt per live pass, with post-work minute recovery. Heartbeat
 reports current delivery backlog and separate model admission reasons. Deterministic
-tests cover the acceptance criteria using fakes. Live Discord and full-loop
-verification remain Milestone 8 work.
+  tests cover the acceptance criteria using fakes. A separately scoped live
+  Discord smoke test sent one labeled fake report, verified its receipt by
+  lookup, and confirmed a restart did not resubmit it (25 September 2026).
+  Full-loop live verification remains Milestone 8 work.
 
 ### Milestone 8 — Full-loop hardening
 

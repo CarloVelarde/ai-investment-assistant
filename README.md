@@ -58,8 +58,11 @@ Edit `.env` before a live run. Never commit `.env`.
   held. Keep the original webhook available for receipt confirmation.
 - For the SEC value, use a short contact string such as `Your Name you@example.com`.
 
-Discord has not had a live smoke test in this milestone. Automated tests use a fake
-HTTP transport and fake providers; full-loop live checks belong to Milestone 8.
+One live Discord smoke test passed on 25 September 2026 using a saved fake report
+and an isolated database: Discord returned a message receipt, read-only lookup
+verified it, and a restart made no second submission. The message is labeled
+`FAKE RESEARCH — NOT INVESTMENT ANALYSIS`. Automated tests still use fake
+providers; full-loop live checks belong to Milestone 8.
 Use `uv run python -m investment_assistant notifications list` to inspect held or
 failed delivery IDs. With the live loop stopped, use
 `uv run python -m investment_assistant notifications confirm --delivery-id ID --message-id ID`

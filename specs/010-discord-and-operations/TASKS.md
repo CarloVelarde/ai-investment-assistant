@@ -163,8 +163,8 @@ documentation was consulted for the contract, not to verify account access.
   describe the implemented status and recovery behavior.
 - The scope test permits the webhook adapter while guarding against a bot,
   worker, trading code, and event-policy ownership in the adapter. No durable
-  product or architecture decision changed. Live Discord and full-loop trials
-  remain in Milestone 8; completion here means deterministic acceptance only.
+  product or architecture decision changed. At task completion, full-loop live
+  verification remained in Milestone 8; the narrow Discord trial is recorded below.
 
 ### Acceptance evidence
 
@@ -203,3 +203,19 @@ temporary `UV_CACHE_DIR`: Ruff format, Ruff lint, mypy (85 source files), and
 pytest (552 tests). Tests used fakes and temporary SQLite databases; there were
 no live provider calls. The regular commands in AGENTS.md are equivalent when
 the default uv cache is writable. Full-loop live-provider results are not claimed.
+
+## Separately scoped live Discord trial — 25 September 2026
+
+On a test branch, a one-off runner used the real configured Discord webhook with
+an isolated temporary SQLite database and one saved `TEST` fixture report labeled
+`FAKE RESEARCH — NOT INVESTMENT ANALYSIS`. The app ran its normal live delivery
+path with fake market data and no OpenAI key or research call. The real webhook
+accepted one POST; SQLite recorded `SUCCEEDED`, one submission, a numeric message
+receipt, and `NOTIFIED` for the matching event. A read-only Discord message lookup
+verified the logical delivery ID in the footer. Restarting the app against the
+same database left the submission count at one and the event notified.
+
+The run did not exercise real Alpaca, OpenAI, SEC, provider failure/retry, uncertain
+delivery, or the complete signal-to-report loop. Those broader live checks remain
+under [spec 011](../011-full-loop-hardening/SPEC.md). No webhook URL, token, or
+message ID is recorded here.

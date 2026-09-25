@@ -281,7 +281,7 @@ already completed updates. Console logging itself is not transactional with SQLi
 **Why:** This replaces the absolute duplicate-prevention wording in Product and
 Architecture with a recoverable, testable guarantee. Detailed states, retry rules,
 and recovery commands belong to spec 010. Milestone 7's deterministic acceptance
-checks passed; live-provider verification belongs to Milestone 8.
+checks passed; full-loop live-provider verification belongs to Milestone 8.
 
 ### D-031 — Reserve model use before I/O and label estimated cost honestly
 
