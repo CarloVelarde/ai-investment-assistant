@@ -117,7 +117,7 @@ def poll_and_classify_news(
         else:
             diagnostics.append("news page cap reached")
     except NewsProviderError as error:
-        reason = _safe_text(str(error))
+        reason = f"NEWS_PROVIDER_{type(error).__name__}"
         diagnostics.append(reason)
         logger.warning("News request failed", extra={"reason": reason})
 
@@ -270,10 +270,10 @@ def _classify_pending(
                     model_version=model_version,
                     status=ClassificationStatus.FAILED,
                     attempted_at=now,
-                    safe_error=_safe_text(
-                        str(error)
+                    safe_error=(
+                        "NEWS_CLASSIFIER_ERROR"
                         if isinstance(error, NewsClassifierError)
-                        else "classifier request failed"
+                        else "CLASSIFIER_REQUEST_FAILED"
                     ),
                 )
             finally:
@@ -394,6 +394,12 @@ def _persist_non_success(
     model_version: str,
     safe_error: str,
 ) -> None:
+    previous = storage.get_news_classification(
+        article.article_id,
+        ticker,
+        prompt_version=prompt_version,
+        model_version=model_version,
+    )
     storage.save_news_classification(
         NewsClassification(
             article_id=article.article_id,
@@ -405,6 +411,15 @@ def _persist_non_success(
             safe_error=_safe_text(safe_error),
         )
     )
+    if status is ClassificationStatus.DEFERRED and (
+        previous is None
+        or previous.status is not status
+        or previous.safe_error != safe_error
+    ):
+        logger.info(
+            "Classifier deferred", extra={"ticker": ticker, "reason": safe_error}
+        )
+        watch("Classifier deferred", ticker=ticker, reason=safe_error)
 
 
 def _signal_direction(direction: NewsDirection) -> SignalDirection | None:

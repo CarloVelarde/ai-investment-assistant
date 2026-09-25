@@ -1,5 +1,6 @@
 """Deterministic grouping, promotion, and processing of qualifying signals."""
 
+import logging
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -20,6 +21,7 @@ from investment_assistant.models import (
     SignalDirection,
     SignalImportance,
 )
+from investment_assistant.ops_log import watch
 from investment_assistant.reporting import emit_console_notification
 from investment_assistant.research import ResearchDeferred
 from investment_assistant.storage import SQLiteStorage
@@ -29,6 +31,8 @@ if TYPE_CHECKING:
 
 type DurableResearcher = Callable[[Event, tuple[Signal, ...]], ResearchReport]
 type DurableNotifier = Callable[[Event, ResearchReport], None]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,11 +52,14 @@ class EventManager:
         *,
         clock: Clock,
         delivery_manager: DeliveryManager | None = None,
+        log_console_fallback: bool = False,
     ) -> None:
         self._storage = storage
         self._clock = clock
         self._delivery_manager = delivery_manager
         self.last_delivery_attempted = False
+        self._log_console_fallback = log_console_fallback
+        self._console_fallback_logged = False
 
     def handle_signal(self, signal: Signal) -> SignalHandlingResult:
         """Accept a signal once and group it into one durable event."""
@@ -246,10 +253,25 @@ class EventManager:
         if started is None:
             return self._storage.get_event(event.event_id)
         signals = self._storage.list_signals(started.event_id)
+        previous_deferral = self._storage.get_research_deferral(
+            started.event_id, started.current_update
+        )
         try:
             report = researcher(started, signals)
             _validate_report(report, started)
         except ResearchDeferred:
+            deferral = self._storage.get_research_deferral(
+                started.event_id, started.current_update
+            )
+            if deferral is not None and deferral != previous_deferral:
+                fields = {
+                    "ticker": started.ticker,
+                    "event_id": started.event_id,
+                    "event_update": started.current_update,
+                    "reason": deferral.reason,
+                }
+                logger.info("Research deferred", extra=fields)
+                watch("Research deferred", **fields)
             return self._storage.get_event(started.event_id)
         except Exception as error:
             failure = self._new_failure(started, FailureStep.RESEARCH, error)
@@ -296,6 +318,13 @@ class EventManager:
             f"attempt:{current.event_id}:{current.current_update}:{attempt_number}"
         )
         if notifier is emit_console_notification:
+            if self._log_console_fallback and not self._console_fallback_logged:
+                with suppress(Exception):
+                    logger.info(
+                        "Discord not configured; using console for saved reports"
+                    )
+                watch("Discord not configured; using console for saved reports")
+                self._console_fallback_logged = True
             attempt = NotificationAttempt(
                 attempt_id=attempt_id,
                 event_id=current.event_id,

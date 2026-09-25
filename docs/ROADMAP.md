@@ -4,11 +4,10 @@
 
 ## Current focus
 
-Milestones 0–6 are implemented: the local app monitors markets and news, retains
-event history, and produces research reports. **Milestone 7 — Discord and
-operations** is in progress: durable delivery and the webhook adapter are being
-implemented; operator recovery, model-cost controls, and expanded operations
-remain. **Milestone 8 — Full-loop hardening** then verifies the complete local MVP.
+Milestones 0–7 are implemented: the local app monitors markets and news, retains
+event history, researches selected updates, and delivers saved reports through
+durable Discord or console paths. **Milestone 8 — Full-loop hardening** is next;
+it verifies the complete local MVP with replay and bounded live checks.
 
 Completed milestones record implementation and acceptance checks. Live verification
 is noted separately; the full loop still needs Milestone 8's validation. Each linked
@@ -155,7 +154,7 @@ change was added. Automated checks use fakes only; no live smoke was run.
 
 ### Milestone 7 — Discord and operations
 
-**Status:** In progress; Tasks 2–7 implemented, acceptance review pending
+**Status:** Complete; deterministic acceptance checks passed
 
 **Spec:** [`specs/010-discord-and-operations/`](../specs/010-discord-and-operations/SPEC.md)
 
@@ -167,12 +166,15 @@ estimated-cost limits. Preserve quiet routine repeats and timely material update
 remain visible and recoverable, and usage controls hold across restarts. Acceptance
 checks pass; integrated live verification follows in Milestone 8.
 
-**Current slice:** SQLite v7 records delivery claims, submissions, receipts, retry
+**Completed:** SQLite v7 records delivery claims, submissions, receipts, retry
 state, and shared estimated model-cost reservations. One webhook adapter sends saved
 reports in live mode; local commands list, retry, and confirm held work. Console
 completion is durable before its output. Migration retains prior history and holds
-model calls on a legacy-spend migration day. Fake-provider tests cover this slice.
-Live scheduling, expanded status, and full-loop verification remain open.
+model calls on a legacy-spend migration day. One due external send runs before
+one research attempt per live pass, with post-work minute recovery. Heartbeat
+reports current delivery backlog and separate model admission reasons. Deterministic
+tests cover the acceptance criteria using fakes. Live Discord and full-loop
+verification remain Milestone 8 work.
 
 ### Milestone 8 — Full-loop hardening
 

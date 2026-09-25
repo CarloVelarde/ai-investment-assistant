@@ -1,13 +1,13 @@
 # Implementation Plan: Discord and Operations
 
-**Document status:** Refined; implementation in progress
+**Document status:** Implemented
 
-**Implementation status:** In progress — delivery, recovery commands, and model-use admission implemented
+**Implementation status:** Complete — deterministic acceptance checks passed
 
 Implement [SPEC.md](SPEC.md) in the slices below. Track evidence in
 [TASKS.md](TASKS.md). The implementation upgrades SQLite version 5 to version 7,
 including a v6-to-v7 migration for operator submissions and model-use accounting.
-The table below records the starting gaps; remaining slices still follow this plan.
+The table below records the starting gaps and the implementation path.
 
 ## Existing seams and gaps
 

@@ -289,7 +289,7 @@ def articles_from_response(
             diagnostics.append("skipped invalid Alpaca news article")
             logger.warning(
                 "Skipping invalid Alpaca news article",
-                extra={"reason": str(error)},
+                extra={"reason": type(error).__name__},
             )
     return tuple(articles), tuple(diagnostics)
 

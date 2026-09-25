@@ -9,6 +9,8 @@ from investment_assistant.config import Settings
 from investment_assistant.delivery import (
     DatabaseOwner,
     DeliveryManager,
+    DeliveryState,
+    destination_fingerprint,
     read_only_deliveries,
 )
 from investment_assistant.discord_notify import DiscordNotifier
@@ -30,8 +32,18 @@ def run_notifications(
     parsed = parser.parse_args(args)
     current_clock = clock or SystemClock()
     if parsed.command == "list":
+        webhook = settings.discord_webhook_url.get_secret_value()
+        fingerprint = destination_fingerprint(webhook) if webhook else None
         for record in read_only_deliveries(settings.database_path):
             retry_at = record.next_attempt_at or record.resend_not_before
+            uncertain_recovery = None
+            if record.state is DeliveryState.UNCERTAIN:
+                if record.uncertain_resend_used:
+                    uncertain_recovery = "operator_review"
+                elif record.destination_fingerprint != fingerprint:
+                    uncertain_recovery = "restore_destination"
+                else:
+                    uncertain_recovery = "awaiting_resend"
             print(
                 json.dumps(
                     {
@@ -46,6 +58,7 @@ def run_notifications(
                         "retry_at": retry_at.isoformat() if retry_at else None,
                         "message_id": record.message_id,
                         "manual_authorized": record.manual_authorized,
+                        "uncertain_recovery": uncertain_recovery,
                     }
                 )
             )

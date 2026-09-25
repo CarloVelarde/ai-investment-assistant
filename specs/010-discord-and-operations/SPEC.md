@@ -1,10 +1,10 @@
 # Feature Specification: Discord and Operations
 
-**Document status:** Refined; implementation in progress
+**Document status:** Implemented
 
 **Milestone:** 7 — Discord and operations
 
-**Implementation status:** In progress — Tasks 2–7 implemented; Milestone 7 open
+**Implementation status:** Complete — Milestone 7 deterministic acceptance checks passed
 
 Behavior belongs here; [PLAN.md](PLAN.md) owns implementation and
 [TASKS.md](TASKS.md) owns execution. Durable decisions: D-030–D-032 in
@@ -22,9 +22,9 @@ rules. Neither the notifier nor the budget ledger decides significance.
 Before this milestone, `EventManager._notify` called a console notifier before saving
 its result. SQLite v5 prevented multiple locally recorded successes but had no
 pre-send claim, receipt, retry schedule, destination, or uncertain-outcome state.
-Tasks 2–7 add SQLite v7, the live Discord path, local recovery commands, durable
-console completion, and shared model-use admission. Live scheduling and expanded
-operational status remain later tasks. There is no six-hour cooldown timer.
+Tasks 2–10 add SQLite v7, the live Discord path, local recovery commands, durable
+console completion, shared model-use admission, bounded live scheduling, and
+operational status. There is no six-hour cooldown timer.
 Implementation evidence is tracked in [TASKS.md](TASKS.md).
 
 ## Scope
@@ -336,13 +336,13 @@ configurable quota for them. Saved-report delivery ignores model admission limit
 
 ## Acceptance criteria
 
-- [ ] AC-01: Discord success requires a saved current report, pre-I/O claim,
+- [x] AC-01: Discord success requires a saved current report, pre-I/O claim,
   receipt, and guarded completion; repeat passes/restarts make no second POST.
-- [ ] AC-02: Crash tests cover before POST, after remote acceptance before receipt,
+- [x] AC-02: Crash tests cover before POST, after remote acceptance before receipt,
   after receipt before completion, and after completion before console output.
   Unknown outcomes wait 15 minutes for one automatic resend; known receipts finish
   locally; stale receipts survive. The wait and consumed allowance survive restart.
-- [ ] AC-03: The five-submission ordinary bound, 1/2/4/8-minute waits, and single
+- [x] AC-03: The five-submission ordinary bound, 1/2/4/8-minute waits, and single
   additional uncertain resend persist across restarts (at most six automatic
   submissions). Test just before/at the 15-minute boundary, a longer provider wait,
   uncertainty on submission 5, repeated uncertainty, definite resend failure, and a
@@ -350,29 +350,29 @@ configurable quota for them. Saved-report delivery ignores model admission limit
   chain. Known success, supersession, or a changed destination prevents resend.
   429/bucket waits apply across reports and are never shortened; permanent errors
   disable only the correct scope. Malformed 2xx and 5xx follow the uncertain policy.
-- [ ] AC-04: List, explicit single retry, and receipt-confirmation commands recover
+- [x] AC-04: List, explicit single retry, and receipt-confirmation commands recover
   held work without SQL edits/research. Repeated commands, destination changes,
   global waits, stale updates, and second-process ownership are covered.
-- [ ] AC-05: Blank webhook/offline mode make no Discord calls. Configured failures
+- [x] AC-05: Blank webhook/offline mode make no Discord calls. Configured failures
   never fall back. Destination changes do not replay success. Fake labels survive.
-- [ ] AC-06: Routine repeats remain quiet; material updates/new episodes remain
+- [x] AC-06: Routine repeats remain quiet; material updates/new episodes remain
   eligible; failures/rejected news never set successful notification time. No
   cooldown timer or promotion change is introduced.
-- [ ] AC-07: Alert links, mention suppression, truncation, total/field limits,
+- [x] AC-07: Alert links, mention suppression, truncation, total/field limits,
   URL validation, total deadline, bounded body, redirects, and secret-safe errors
   are tested at the adapter boundary.
-- [ ] AC-08: Count and spend reservations precede calls, survive crashes/settings
+- [x] AC-08: Count and spend reservations precede calls, survive crashes/settings
   changes/UTC rollover, and cover failures, missing usage, invalid/stale results,
   hosted search, overrun, and settlement replay. Zero/invalid caps are tested.
-- [ ] AC-09: Insufficient budget consumes no start and leaves no fake report;
+- [x] AC-09: Insufficient budget consumes no start and leaves no fake report;
   saved reports still deliver. Missing key and separate per-kind deferrals stay
   understandable and do not repeat on every pass.
-- [ ] AC-10: One due external send/pass, notification-first ordering, research
+- [x] AC-10: One due external send/pass, notification-first ordering, research
   fairness, post-delivery recovery, session close, and backlog progress are tested.
-- [ ] AC-11: SQLite v5 upgrade preserves history/successes and counts; older supported
+- [x] AC-11: SQLite v5 upgrade preserves history/successes and counts; older supported
   migrations still work. Migration-day unknown spend is handled conservatively.
   Status/logs reflect actual state with independent heartbeat/watch switches.
-- [ ] AC-12: All repository checks pass without live services; scope guards permit
+- [x] AC-12: All repository checks pass without live services; scope guards permit
   only the new adapter/operations paths. README and `.env.example` describe working
   behavior, limits, and recovery. Milestone 7 completes only after AC-01–11 pass;
   Milestone 8 remains open.

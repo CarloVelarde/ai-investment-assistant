@@ -45,6 +45,7 @@ from investment_assistant.news_ingest import poll_and_classify_news
 from investment_assistant.ops_log import (
     emit_heartbeat,
     heartbeat_is_due,
+    operational_status,
     watch,
 )
 from investment_assistant.pipeline import run_market_history
@@ -204,7 +205,12 @@ def run_live_session(
                 webhook_url=webhook_url,
                 sender=discord_sender or DiscordNotifier(webhook_url).send,
             )
-        manager = EventManager(storage, clock=clock, delivery_manager=delivery_manager)
+        manager = EventManager(
+            storage,
+            clock=clock,
+            delivery_manager=delivery_manager,
+            log_console_fallback=not webhook_url,
+        )
         live_researcher = researcher or build_live_researcher(storage, settings, clock)
         latest = backfill_and_replay(
             storage=storage,
@@ -393,6 +399,7 @@ def run_live_session(
                     last_message_at=health.last_message_at,
                     last_spy_regular_end_at=health.last_spy_regular_end_at,
                     waiting_on_socket=session.is_open,
+                    status=operational_status(storage, settings, now),
                 )
                 last_heartbeat_at = now
             cycles += 1
@@ -556,8 +563,7 @@ def _poll_news_if_due(
 
 
 def _safe_news_reason(error: BaseException) -> str:
-    text = " ".join(str(error).split())
-    return text[:300] if text else "news poll failed"
+    return f"NEWS_POLL_{type(error).__name__}"[:300]
 
 
 def _process_pending_events(
@@ -601,12 +607,12 @@ def _process_pending_and_recover(
 ) -> tuple[LiveIngestResult, bool]:
     """Deliver reports, run at most one research attempt, then recover minutes."""
 
-    researched = _process_pending_events(
+    external_work = _process_pending_events(
         manager,
         researcher=researcher,
         notifier=notifier,
     )
-    if not researched:
+    if not external_work:
         return latest, stream_connected
     session = provider.get_session()
     gap = fill_minute_gap(
@@ -618,7 +624,7 @@ def _process_pending_and_recover(
     )
     latest = _combine(latest, gap)
     watch(
-        "Post-research minute gap filled",
+        "Post-work minute gap filled",
         bars=len(gap.persisted_bar_ids),
         accepted=len(gap.accepted_signal_ids),
         session_open=session.is_open,

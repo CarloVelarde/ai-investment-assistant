@@ -6,7 +6,7 @@ import logging
 import re
 import sqlite3
 from collections.abc import Callable
-from contextlib import closing
+from contextlib import closing, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
@@ -23,6 +23,7 @@ from investment_assistant.discord_notify import (
     validate_webhook_url,
 )
 from investment_assistant.models import Event, EventStatus, ResearchReport
+from investment_assistant.ops_log import watch
 from investment_assistant.storage import SQLiteStorage, _datetime, _timestamp
 
 type Sender = Callable[[Event, ResearchReport, str], SendResult]
@@ -317,6 +318,7 @@ class DeliveryManager:
                 "UPDATE notification_deliveries SET manual_authorized = 1, updated_at = ? WHERE delivery_id = ?",
                 (_timestamp(now), identity),
             )
+            self._log_transition("Delivery retry authorized", delivery_id=identity)
             return True
 
     def confirm_receipt(self, identity: str, message_id: str) -> bool:
@@ -381,6 +383,7 @@ class DeliveryManager:
                     (message_id, _timestamp(finished_at), identity),
                 )
         self._complete(identity, finished_at)
+        self._log_transition("Delivery receipt confirmed", delivery_id=identity)
         return True
 
     def process_one(self) -> bool:
@@ -420,10 +423,18 @@ class DeliveryManager:
             logger.info(
                 "Discord delivery completed",
                 extra={
+                    "ticker": claim.event.ticker,
                     "event_id": claim.event.event_id,
                     "event_update": claim.event.current_update,
                     "delivery_id": claim.delivery_id,
                 },
+            )
+            watch(
+                "Discord delivery completed",
+                ticker=claim.event.ticker,
+                event_id=claim.event.event_id,
+                event_update=claim.event.current_update,
+                delivery_id=claim.delivery_id,
             )
         else:
             self._settle_failure(claim, result, finished_at)
@@ -445,6 +456,11 @@ class DeliveryManager:
                     outcome = 'UNCERTAIN', safe_reason = 'INTERRUPTED'
                     WHERE attempt_id = ? AND outcome IS NULL""",
                     (_timestamp(now), row["active_attempt_id"]),
+                )
+                self._log_transition(
+                    "Interrupted delivery became uncertain",
+                    delivery_id=str(row["delivery_id"]),
+                    retry_at=_timestamp(deadline),
                 )
                 self._db.execute(
                     """UPDATE notification_deliveries SET state = 'UNCERTAIN',
@@ -478,7 +494,7 @@ class DeliveryManager:
                 (_timestamp(now),),
             )
             rows = self._db.execute(
-                """SELECT e.event_id, e.current_update FROM events e
+                """SELECT e.event_id, e.current_update, r.created_at FROM events e
                 JOIN reports r ON r.event_id = e.event_id AND r.event_update = e.current_update
                 WHERE e.status IN ('REPORTED', 'FAILED') ORDER BY r.created_at, e.event_id"""
             ).fetchall()
@@ -495,7 +511,7 @@ class DeliveryManager:
                         event_id,
                         update,
                         self._fingerprint,
-                        _timestamp(now),
+                        row["created_at"],
                         _timestamp(now),
                     ),
                 )
@@ -620,6 +636,13 @@ class DeliveryManager:
                         _timestamp(now),
                     ),
                 )
+            self._log_transition(
+                "Discord resend claimed" if resend else "Discord delivery claimed",
+                ticker=event.ticker,
+                event_id=event.event_id,
+                event_update=event.current_update,
+                delivery_id=str(row["delivery_id"]),
+            )
             return Claim(
                 str(row["delivery_id"]), attempt_id, event, report, resend, manual
             )
@@ -671,6 +694,12 @@ class DeliveryManager:
                 ),
             )
             self._store_provider_wait(result, now)
+
+    @staticmethod
+    def _log_transition(message: str, **fields: object) -> None:
+        with suppress(Exception):
+            logger.info(message, extra=fields)
+        watch(message, **fields)
 
     def _complete(self, identity: str, now: datetime) -> None:
         with self._storage.transaction():
@@ -764,6 +793,21 @@ class DeliveryManager:
             if result.disable_destination:
                 self._disable_destination(reason)
             self._store_provider_wait(result, now)
+        retry_at = next_attempt or resend_deadline
+        message = (
+            "Discord resend exhausted"
+            if claim.resend
+            else "Discord delivery " + state.lower()
+        )
+        self._log_transition(
+            message,
+            ticker=claim.event.ticker,
+            event_id=claim.event.event_id,
+            event_update=claim.event.current_update,
+            delivery_id=claim.delivery_id,
+            reason=reason,
+            retry_at=_timestamp(retry_at) if retry_at is not None else None,
+        )
 
     def _disable_destination(self, reason: str) -> None:
         self._db.execute(

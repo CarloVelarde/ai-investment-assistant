@@ -1,13 +1,13 @@
 """Local recovery command routing without live services."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from pydantic import SecretStr
 
-from investment_assistant.clock import FixedClock
+from investment_assistant.clock import FixedClock, SteppingClock
 from investment_assistant.config import Settings
 from investment_assistant.delivery import DatabaseOwner, DeliveryManager, delivery_id
 from investment_assistant.discord_notify import DeliveryOutcome, SendResult
@@ -97,3 +97,44 @@ def test_list_is_read_only_and_retry_requires_owner(
             ).fetchone()[0]
             == 1
         )
+
+
+def test_list_explains_uncertain_resend_and_operator_review(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "uncertain.db"
+    event = Event(
+        event_id="event:uncertain",
+        ticker="TEST",
+        direction=SignalDirection.UP,
+        category=None,
+        importance=SignalImportance.MODERATE,
+        market_windows=(MarketWindow.ONE_HOUR,),
+        current_update=1,
+        status=EventStatus.REPORTED,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    settings = Settings(database_path=path, discord_webhook_url=SecretStr(WEBHOOK))
+    clock = SteppingClock(NOW)
+    with SQLiteStorage(path) as storage:
+        storage.initialize(now=NOW)
+        storage.save_event(event)
+        storage.save_report(create_fake_research_report(event, ()))
+        manager = DeliveryManager(
+            storage,
+            clock=clock,
+            webhook_url=WEBHOOK,
+            sender=lambda *_: SendResult(
+                DeliveryOutcome.UNCERTAIN, safe_reason="TIMEOUT"
+            ),
+        )
+        assert manager.process_one()
+        assert run_notifications(settings, ["list"], clock=clock) == 0
+        output = json.loads(capsys.readouterr().out)
+        assert output["uncertain_recovery"] == "awaiting_resend"
+        clock.advance_to(NOW + timedelta(minutes=15))
+        assert manager.process_one()
+        assert run_notifications(settings, ["list"], clock=clock) == 0
+        output = json.loads(capsys.readouterr().out)
+        assert output["uncertain_recovery"] == "operator_review"

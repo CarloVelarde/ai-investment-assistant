@@ -74,4 +74,19 @@ def test_research_stays_inside_the_process_and_off_the_decision_path() -> None:
     event_manager = (SOURCE / "event_manager.py").read_text(encoding="utf-8")
     assert "OpenAIResearchModel" not in event_manager
     assert "SecClient" not in event_manager
-    assert "discord" not in event_manager.lower()
+    assert "DiscordNotifier" not in event_manager
+    assert "validate_webhook_url" not in event_manager
+
+
+def test_webhook_adapter_and_delivery_do_not_own_event_policy_or_trading() -> None:
+    adapter = (SOURCE / "discord_notify.py").read_text(encoding="utf-8")
+    delivery = (SOURCE / "delivery.py").read_text(encoding="utf-8")
+
+    for text in (adapter, delivery):
+        assert "place_order" not in text
+        assert "Celery" not in text
+        assert "APScheduler" not in text
+        assert "alpaca_trade_api" not in text
+    assert "EventManager" not in adapter
+    assert "ResearchRunner" not in delivery
+    assert "news_signal_from_classification" not in delivery

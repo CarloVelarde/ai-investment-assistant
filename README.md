@@ -19,13 +19,12 @@ flowchart LR
 
 Related updates stay on the same case so you are not flooded with repeats. Significant good news and bad news can both start a case. Details live in the [architecture](docs/ARCHITECTURE.md).
 
-Market monitoring, news classification, and bounded research are implemented.
-Milestone 7 is in progress: live mode can deliver a saved report to one Discord
+Market monitoring, news classification, bounded research, and Milestone 7 operations
+are implemented. Live mode can deliver a saved report to one Discord
 webhook with durable claims, receipts, finite retries, local recovery commands,
-and a shared estimated model-cost ledger. Expanded status and final integration
-checks remain open in
-[Spec 010](specs/010-discord-and-operations/SPEC.md). [Spec 011](specs/011-full-loop-hardening/SPEC.md)
-owns final replay and live verification; see the [roadmap](docs/ROADMAP.md).
+and a shared estimated model-cost ledger. [Spec 011](specs/011-full-loop-hardening/SPEC.md)
+owns the remaining full-loop replay and live verification; see the
+[roadmap](docs/ROADMAP.md).
 
 ## Setup
 
@@ -69,6 +68,9 @@ after finding the message in Discord, or
 to authorize one extra send on the next live pass. Retry can duplicate an alert;
 confirmation only reads the message. Provider waits still apply. An automatic
 uncertain resend must finish or be confirmed before a manual retry can be authorized.
+The `uncertain_recovery` field in `notifications list` distinguishes an unused
+resend allowance, a webhook that must be restored, and operator review after
+the allowance was consumed.
 
 The SQLite v7 upgrade preserves prior reports and notification history. A v5 or v6
 database with earlier model calls on the upgrade's UTC day has unknown spend, so
@@ -77,6 +79,25 @@ The $2 default reserves up to $1.62 for a new research run and $0.0825 for a
 classifier call before I/O, then releases unused allowance when recorded usage is
 valid. Failed or interrupted requests retain conservative charges. These are
 application estimates, not an invoice or an account-wide spending limit.
+
+In live mode, each pass attempts at most one due Discord submission before at
+most one research run. A newly saved report waits for the next pass. After a
+send or research call, the app fills any missed regular-session minutes, including
+when the send fails or times out. Waiting or held alerts remain in SQLite and do
+not prevent newer research. A changed webhook never resends completed updates;
+removing it holds uncertain Discord work for recovery with the original webhook.
+Console delivery is the explicit fallback only when no webhook is configured.
+
+Default JSON logs record state changes without report text or credentials. Set
+`INVESTMENT_ASSISTANT_HEARTBEAT=true` for a minute-by-minute status line: it shows
+the notification destination, pending/uncertain/failed counts, oldest pending
+age, estimated charged/reserved/remaining USD, and separate research/classifier
+admission reasons with their required reservations. `MODEL_BUDGET` can therefore
+block a $1.62 research run while a $0.0825 classification still fits. Set
+`INVESTMENT_ASSISTANT_WATCH_LOG=true` independently for a more detailed local
+process narrative. Uncertain counts include alerts waiting for the one automatic
+resend; `uncertain_awaiting_resend` separates those from alerts needing operator
+review. Historical superseded reports do not count as pending.
 
 ## Checks
 

@@ -859,6 +859,53 @@ class SQLiteStorage:
         ).fetchone()
         return int(row[0])
 
+    def model_budget_totals(self, utc_day: str) -> tuple[int, int]:
+        """Return charged and still reserved microdollars for one UTC day."""
+
+        row = self._connection.execute(
+            """SELECT COALESCE(SUM(charged_microdollars), 0),
+            COALESCE(SUM(reserved_microdollars), 0)
+            FROM model_budget_runs WHERE utc_day = ?""",
+            (utc_day,),
+        ).fetchone()
+        return int(row[0]), int(row[1])
+
+    def notification_backlog(
+        self, now: datetime
+    ) -> tuple[int, int, int, int, float | None]:
+        """Count only current reported updates, including ones not discovered yet."""
+
+        rows = self._connection.execute(
+            """SELECT r.created_at, d.state, d.uncertain_resend_used
+            FROM events e JOIN reports r
+              ON r.event_id = e.event_id AND r.event_update = e.current_update
+            LEFT JOIN notification_deliveries d
+              ON d.event_id = e.event_id AND d.event_update = e.current_update
+            WHERE e.status IN ('REPORTED', 'FAILED')
+              AND (d.state IS NULL OR d.state != 'SUCCEEDED')"""
+        ).fetchall()
+        uncertain = sum(row["state"] == "UNCERTAIN" for row in rows)
+        awaiting_resend = sum(
+            row["state"] == "UNCERTAIN" and not row["uncertain_resend_used"]
+            for row in rows
+        )
+        failed = sum(
+            row["state"] == "PERMANENT_FAILURE"
+            or (row["state"] == "UNCERTAIN" and row["uncertain_resend_used"])
+            for row in rows
+        )
+        age = (
+            max(
+                0.0,
+                (
+                    now - min(_datetime(row["created_at"]) for row in rows)
+                ).total_seconds(),
+            )
+            if rows
+            else None
+        )
+        return len(rows), uncertain, awaiting_resend, failed, age
+
     def model_budget_overrun(self, utc_day: str) -> bool:
         return (
             self._connection.execute(

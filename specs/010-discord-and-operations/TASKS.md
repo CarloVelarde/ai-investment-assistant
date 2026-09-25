@@ -1,8 +1,8 @@
 # Tasks: Discord and Operations
 
-**Document status:** Refined; implementation in progress
+**Document status:** Complete
 
-**Execution status:** Tasks 2–7 implemented and tested; Milestone 7 remains open
+**Execution status:** Tasks 1–10 complete; Milestone 7 deterministic acceptance checks passed
 
 Behavior: [SPEC.md](SPEC.md). Approach: [PLAN.md](PLAN.md). Checkbox completion
 requires the named behavior and its tests, not merely a helper or schema field.
@@ -44,14 +44,14 @@ requires the named behavior and its tests, not merely a helper or schema field.
   Test failures, invalid/stale output, interrupted requests, missing usage/search
   counts, full-run release, overrun, unknown pricing, UTC rollover, cap reductions,
   settings validation, and saved-report delivery during model deferral.
-- [ ] 8. Wire one external delivery before at most one research run/pass; extend
+- [x] 8. Wire one external delivery before at most one research run/pass; extend
   minute recovery to delivery failures/timeouts and regular-session transitions.
   Test backlog fairness, next-pass delivery of new reports, and offline draining.
-- [ ] 9. Extend quiet logs, heartbeat, and watch narration; test secret redaction
+- [x] 9. Extend quiet logs, heartbeat, and watch narration; test secret redaction
   including invalid configuration and HTTP exceptions. Add safe operational status,
   backlog age, and per-kind admission reasons. Update README and `.env.example`
   only for implemented settings/commands and explain migration/recovery limitations.
-- [ ] 10. Update obsolete milestone scope guards without weakening no-worker,
+- [x] 10. Update obsolete milestone scope guards without weakening no-worker,
   no-bot, no-trading, or decision-boundary rules. Run all repository checks, link
   each AC to passing tests, then mark Milestone 7 complete and hand off to spec 011.
 
@@ -147,18 +147,59 @@ documentation was consulted for the contract, not to verify account access.
   status, full Milestone 7 acceptance review, and Milestone 8 live verification
   remain open.
 
-## Handoff for Tasks 8–10
+## Completion record — Tasks 8–10, 25 September 2026
 
-- Start with [SPEC.md](SPEC.md) and [PLAN.md](PLAN.md). Task 8 already has a partial
-  path: `EventManager.process_pending` attempts one Discord delivery before its
-  capped research run, and `main._process_pending_events` tracks external work.
-  Prove or correct backlog fairness, next-pass delivery, minute recovery after
-  send failure/timeout, and regular-session transitions. Keep offline draining.
-- For Task 9, `README.md` and `.env.example` already describe implemented commands
-  and model limits. `ops_log.py` and the heartbeat call sites still lack the
-  requested delivery backlog, age, destination, cost, and per-kind deferral status.
-  Add transition logs and safe status without printing webhook URLs or report bodies.
-- For Task 10, `tests/test_milestone_scope.py` already permits the intended webhook
-  adapter while retaining no-bot/no-worker/no-trading guards. Finish the acceptance
-  evidence matrix, run all required checks, then update Milestone 7 status only if
-  AC-01–11 pass. Milestone 8 live verification remains a separate gate.
+- The live loop sends at most one due Discord alert before one research run per
+  pass. A new report waits for the next pass. Delivery eligibility now uses the
+  saved report time, so a newer report cannot overtake an older backlog item.
+  Failed and timed-out sends still trigger minute gap recovery; a session close
+  during a send closes the stock socket. Offline processing still drains through
+  the existing event-manager path.
+- The optional heartbeat reads current report backlog, uncertain and failed work,
+  oldest pending age, separate classifier/research admission, and charged,
+  reserved, and remaining estimated USD from SQLite. JSON and watch logs record
+  delivery and budget transitions. News and HTTP exception text cannot echo a
+  webhook or provider token through these paths. README and `.env.example` now
+  describe the implemented status and recovery behavior.
+- The scope test permits the webhook adapter while guarding against a bot,
+  worker, trading code, and event-policy ownership in the adapter. No durable
+  product or architecture decision changed. Live Discord and full-loop trials
+  remain in Milestone 8; completion here means deterministic acceptance only.
+
+### Acceptance evidence
+
+The named tests below are in [delivery](../../tests/test_delivery.py),
+[Discord adapter](../../tests/test_discord_notify.py),
+[notifications](../../tests/test_notifications.py),
+[live operations](../../tests/test_milestone7_operations.py),
+[main loop](../../tests/test_main.py),
+[model budget](../../tests/test_model_budget.py),
+[news ingest](../../tests/test_news_ingest.py),
+[event policy](../../tests/test_event_manager.py),
+[event processing](../../tests/test_event_processing.py),
+[research](../../tests/test_research_runner.py),
+[ops visibility](../../tests/test_ops_visibility.py), and
+[scope guards](../../tests/test_milestone_scope.py).
+
+| Criterion | Passing tests |
+| --- | --- |
+| AC-01 | `test_success_is_claimed_before_send_and_never_posted_twice`; `test_live_session_delivers_saved_report_through_webhook_sender` |
+| AC-02 | `test_unresolved_claim_waits_once_after_restart_and_resends_once`; `test_receipt_saved_before_completion_finishes_locally_after_restart`; `test_completed_delivery_is_not_resent_if_output_fails`; `test_stale_receipt_does_not_mark_new_update_notified` |
+| AC-03 | `test_five_definite_failures_use_one_two_four_eight_minute_waits`; `test_fifth_attempt_uncertainty_allows_only_one_sixth_submission`; `test_crash_after_consuming_resend_allowance_does_not_replenish_it`; `test_longer_provider_wait_delays_uncertain_resend`; `test_global_rate_limit_wait_survives_restart_and_changed_webhook` |
+| AC-04 | `test_list_is_read_only_and_retry_requires_owner`; `test_list_explains_uncertain_resend_and_operator_review`; `test_manual_retry_is_one_submission_and_respects_global_wait`; `test_confirmation_cancels_pending_resend_and_requires_matching_receipt`; `test_database_lock_releases_when_owner_process_is_killed` |
+| AC-05 | `test_offline_fixture_ignores_unused_webhook_setting`; `test_new_console_report_logs_missing_destination_once`; `test_removing_webhook_holds_uncertain_delivery_out_of_console_path`; `test_console_completion_precedes_best_effort_output`; `test_fake_report_keeps_warning_label` |
+| AC-06 | `test_same_or_lower_importance_is_saved_without_reopening_event`; `test_higher_importance_requeues_existing_event`; `test_later_important_update_is_immediately_eligible_after_notification`; `test_insignificant_and_irrelevant_results_create_no_event` |
+| AC-07 | `test_embed_suppresses_mentions_and_bounds_report_content`; `test_rejects_unsafe_webhook_url_without_echoing_it`; `test_transport_timeout_after_post_is_uncertain`; `test_transport_exception_text_never_reaches_safe_result`; `test_status_excludes_superseded_report_and_news_error_hides_input` |
+| AC-08 | `test_research_reserves_before_io_and_releases_unstarted_slots`; `test_interrupted_requests_keep_charge_and_utc_rollover`; `test_missing_search_count_keeps_search_allowance_and_overrun_is_visible`; `test_classifier_count_unknown_usage_cap_reduction_and_overrun`; `test_invalid_model_output_keeps_independent_usage_charge` |
+| AC-09 | `test_missing_model_and_budget_make_no_calls_and_no_additional_start`; `test_saved_report_delivers_with_zero_model_budget_and_stale_retry_is_rejected`; `test_heartbeat_status_counts_current_backlog_and_separate_admission` |
+| AC-10 | `test_one_send_precedes_research_and_new_report_waits_for_next_pass`; `test_failed_or_timed_out_send_recovers_minutes_after_session_close`; `test_event_manager_defers_new_report_delivery_until_next_pass`; `test_only_latest_waiting_update_is_researched_and_report_precedes_delivery` |
+| AC-11 | `test_migration_preserves_console_history_and_holds_unknown_spend`; `test_v6_submission_history_survives_operator_retry_schema_upgrade`; `test_heartbeat_status_counts_current_backlog_and_separate_admission`; `test_heartbeat_stays_off_when_only_watch_log_is_on` |
+| AC-12 | `test_webhook_adapter_and_delivery_do_not_own_event_policy_or_trading`; `test_runtime_dependencies_do_not_add_live_or_distributed_services`; four repository checks below; README and `.env.example` review |
+
+### Final repository checks
+
+All four checks passed using Python 3.14 and `uv run --offline` with a writable
+temporary `UV_CACHE_DIR`: Ruff format, Ruff lint, mypy (85 source files), and
+pytest (552 tests). Tests used fakes and temporary SQLite databases; there were
+no live provider calls. The regular commands in AGENTS.md are equivalent when
+the default uv cache is writable. Full-loop live-provider results are not claimed.
